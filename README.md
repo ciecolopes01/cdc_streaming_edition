@@ -166,10 +166,10 @@ EXEC sys.sp_cdc_enable_db;
 
 -- 2. Habilitar CDC na tabela alvo (CDC nativo, não Change Tracking)
 EXEC sys.sp_cdc_enable_table
-    @source_schema     = 'dbo',
-    @source_name       = 'orders',
-    @role_name         = NULL,
-    @supports_net_changes = 0;  -- Debezium usa funções "all changes", net changes não é necessário
+    @source_schema        = 'dbo',
+    @source_name          = 'orders',
+    @role_name            = NULL,
+    @supports_net_changes = 0;  -- Debezium usa funções "all changes"; net changes não é necessário
 
 -- 3. Verificar que a tabela está com CDC habilitado
 SELECT name, is_cdc_enabled
@@ -178,6 +178,8 @@ WHERE  name = 'orders';
 ```
 
 > ℹ O parâmetro `@supports_net_changes = 1` habilita funções de "net changes" que retornam apenas o estado final após múltiplas alterações. O Debezium utiliza as funções de "all changes" (`cdc.fn_cdc_get_all_changes_...`), portanto `supports_net_changes` pode ficar como 0 (padrão) sem impacto no funcionamento.
+>
+> ⚠ **Atenção para ambientes com uso misto:** se outras aplicações além do Debezium consomem o CDC nativo do SQL Server via `fn_cdc_get_net_changes_*`, habilite `@supports_net_changes = 1` para não quebrar esses consumidores. O Debezium continuará funcionando normalmente, pois não depende das funções de net changes.
 
 Cada mudança gera um registro com LSN (Log Sequence Number) único. O Debezium persiste o LSN processado como offset, garantindo retomada exata após falhas.
 
@@ -294,7 +296,7 @@ O Debezium padroniza o envelope de evento para todos os bancos suportados. O pay
 
 ### 8.1 Silver — Merge Incremental Correto e Idempotente
 
-A Silver aplica a semântica transacional sobre os eventos crus da Bronze, produzindo uma visão consistente e atualizada de cada entidade.
+A Silver aplica a semântica transacional sobre os eventos crus da Bronze, produzindo uma visão consistente e atualizada de cada entidade. O conceito de at-least-once delivery — e o impacto direto na deduplicação — é tratado em detalhes na seção 9.1.
 
 **✗ Bug comum — acesso direto a `after.id`:**
 
@@ -340,8 +342,22 @@ def upsert_to_silver(batch_df, batch_id, source_type='postgresql'):
     # 1. Adicionar chave de offset conforme o banco de origem
     deduped = build_offset_key(batch_df, source_type)
 
-    # 2. Deduplicação: mantém apenas o último evento por chave de offset
+    # 2. Deduplicação: mantém apenas o último evento por chave de offset.
     #    Em at-least-once, o mesmo offset pode chegar mais de uma vez após falha.
+    #
+    #    ATENÇÃO — dropDuplicates em Structured Streaming acumula estado indefinidamente.
+    #    Para streams de longa duração, prefira dropDuplicatesWithinWatermark (Spark 3.5+)
+    #    com um watermark adequado ao SLA de reprocessamento:
+    #
+    #    deduped = (
+    #        deduped
+    #        .withWatermark('event_time', '2 hours')
+    #        .dropDuplicatesWithinWatermark(['_offset_key'])
+    #    )
+    #
+    #    Usar dropDuplicates sem watermark em streams contínuos pode causar OOM
+    #    à medida que o estado cresce sem limite. Em foreachBatch (modo micro-batch),
+    #    o risco é menor pois o estado é por batch — mas monitore o tamanho do checkpoint.
     deduped = deduped.dropDuplicates(['_offset_key'])
 
     # 3. MERGE com ordem correta das cláusulas:
@@ -422,7 +438,7 @@ Para cenários que exigem exactly-once end-to-end, é necessário combinar:
 - Produtores transacionais no Kafka (`enable.idempotence=true`)
 - Processamento stateful com commit atômico de offset e escrita
 
-> ℹ **Apache Flink com Kafka source e Delta Lake sink** oferece exactly-once nativo via two-phase commit — para isso, adicione a dependência `io.delta:delta-connectors-flink` ao projeto, configure o sink com `.option("checkpointLocation", "...")` e habilite o checkpointing do Flink no modo `EXACTLY_ONCE`. Para pipelines baseados em Kafka Streams, utilize `processing.guarantee=exactly_once_v2` (disponível a partir do Kafka 2.5), que combina transações Kafka com processamento idempotente para garantir exactly-once end-to-end sem necessidade de infraestrutura adicional. Em versões anteriores ao Kafka 2.5, o valor equivalente é `exactly_once`, que oferece a mesma garantia semântica porém com menor throughput por não aproveitar as otimizações de desempenho introduzidas no `exactly_once_v2`.
+> ℹ **Apache Flink com Kafka source e Delta Lake sink** oferece exactly-once nativo via two-phase commit. Para isso, adicione a dependência `io.delta:delta-flink` ao projeto (atenção: o artifact correto a partir do Delta Lake 3.x é `delta-flink`, não `delta-connectors-flink` — o nome foi atualizado quando o projeto foi migrado para o repositório principal do Delta), configure o sink com `.option("checkpointLocation", "...")` e habilite o checkpointing do Flink no modo `EXACTLY_ONCE`. Para pipelines baseados em Kafka Streams, utilize `processing.guarantee=exactly_once_v2` (disponível a partir do Kafka 2.5), que combina transações Kafka com processamento idempotente para garantir exactly-once end-to-end sem necessidade de infraestrutura adicional. Em versões anteriores ao Kafka 2.5, o valor equivalente é `exactly_once`, que oferece a mesma garantia semântica porém com menor throughput por não aproveitar as otimizações de desempenho introduzidas no `exactly_once_v2`.
 
 ---
 
@@ -545,13 +561,8 @@ O Debezium oferece propriedades de configuração nativas para mascarar, hashear
     "database.history.kafka.bootstrap.servers": "kafka:9092",
     "database.history.kafka.topic": "schema-changes.orders",
 
-    // Mascarar com hash SHA-256 (determinístico — útil para joins anônimos)
     "column.mask.hash.SHA-256.with.salt.mySalt": "dbo.customers.email,dbo.customers.cpf",
-    
-    // Mascarar com string fixa (12 caracteres) para dados que não precisam de join
     "column.mask.with.12.chars": "dbo.payments.card_number,dbo.payments.cvv",
-    
-    // Excluir coluna completamente do evento
     "column.exclude.list": "dbo.customers.raw_password"
   }
 }
@@ -609,7 +620,7 @@ kafka-acls --add \
 
 O direito ao esquecimento é um desafio específico de arquiteturas CDC porque a Bronze é imutável por design. As estratégias para lidar com requisições de exclusão sem comprometer o pipeline:
 
-- **Crypto shredding:** criptografe os dados PII da Bronze com uma chave por usuário e destrua a chave quando o usuário solicitar a exclusão. Os eventos históricos permanecem, mas os dados se tornam irrecuperáveis.
+- **Crypto shredding:** criptografe os dados PII com uma chave por usuário **antes de gravar na Bronze** — não depois. Se os dados chegam em texto claro e a criptografia é aplicada em etapa posterior, há uma janela de exposição nos arquivos já escritos. O fluxo correto é: (1) criptografar no conector ou em um SMT antes da publicação no Kafka; (2) gravar apenas o dado já cifrado na Bronze; (3) destruir a chave quando o usuário solicitar a exclusão. Os eventos históricos permanecem, mas os dados se tornam irrecuperáveis.
 - **Tombstone + reprocessamento:** publique um evento de exclusão no tópico CDC com os campos PII nulos ou tokenizados, e reconstrua a Silver a partir desse ponto.
 - **Segregação de PII:** armazene PII em uma tabela separada referenciada por token na Bronze. A exclusão do mapeamento token → PII atende ao direito ao esquecimento sem alterar os eventos históricos.
 
@@ -759,7 +770,7 @@ from testcontainers.kafka import KafkaContainer
 
 # Nota: esses testes assumem que um worker Kafka Connect com Debezium
 # está configurado para apontar para os containers de banco e Kafka.
-# Em um cenário real, você pode usar docker-compose para subir o Connect também.
+# Em um cenário real, use docker-compose para subir o Connect também.
 
 @pytest.fixture(scope='module')
 def postgres():
@@ -773,7 +784,20 @@ def kafka():
     with KafkaContainer('confluentinc/cp-kafka:7.5.0') as k:
         yield k
 
-def test_insert_propagates_to_kafka(postgres, kafka):
+@pytest.fixture
+def kafka_consumer(kafka):
+    """Fixture reutilizável para criar um KafkaConsumer apontando para o container."""
+    consumer = KafkaConsumer(
+        'dbserver1.public.orders',
+        bootstrap_servers=kafka.get_bootstrap_server(),
+        value_deserializer=lambda m: json.loads(m.decode('utf-8')),
+        auto_offset_reset='earliest',
+        consumer_timeout_ms=10000   # falha o teste se nenhuma mensagem chegar em 10s
+    )
+    yield consumer
+    consumer.close()
+
+def test_insert_propagates_to_kafka(postgres, kafka_consumer):
     """
     Testa que um INSERT no banco gera o evento correto no tópico Kafka.
     O Debezium Connect é iniciado apontando para os containers.
@@ -782,13 +806,7 @@ def test_insert_propagates_to_kafka(postgres, kafka):
     conn.cursor().execute("INSERT INTO orders (id, status) VALUES (1, 'open')")
     conn.commit()
 
-    consumer = KafkaConsumer(
-        'dbserver1.public.orders',
-        bootstrap_servers=kafka.get_bootstrap_server(),
-        value_deserializer=lambda m: json.loads(m.decode('utf-8')),
-        auto_offset_reset='earliest'
-    )
-    message = next(consumer)
+    message = next(kafka_consumer)
     payload = message.value['payload']
 
     assert payload['op'] == 'c'
@@ -796,7 +814,7 @@ def test_insert_propagates_to_kafka(postgres, kafka):
     assert payload['after']['status'] == 'open'
     assert payload['before'] is None
 
-def test_delete_event_uses_before_id(postgres, kafka):
+def test_delete_event_uses_before_id(postgres, kafka_consumer):
     """
     Garante que eventos de DELETE contêm before.id e after=null.
     Esse é o caso que falha silenciosamente se o merge usar after.id.
@@ -805,8 +823,7 @@ def test_delete_event_uses_before_id(postgres, kafka):
     conn.cursor().execute("DELETE FROM orders WHERE id = 1")
     conn.commit()
 
-    consumer = KafkaConsumer('dbserver1.public.orders', ...)
-    message = next(consumer)
+    message = next(kafka_consumer)
     payload = message.value['payload']
 
     assert payload['op'] == 'd'
@@ -887,7 +904,10 @@ O Apache Hudi suporta dois modos de escrita com trade-offs distintos:
 
 > ℹ **Para pipelines CDC com alta frequência de UPDATEs, Hudi MOR é frequentemente a escolha mais eficiente.** Para casos de uso analítico pesado com poucas atualizações, Delta Lake COW ou Iceberg são mais indicados.
 
-> ℹ **Hudi MOR — Compactação obrigatória:** no modo Merge On Read, as atualizações são gravadas em arquivos de log Avro e mescladas dinamicamente na leitura. Com o tempo, o acúmulo de logs degrada a performance de leitura. Existem dois modos: **inline** (executada junto com cada commit, via `hoodie.compact.inline=true`) e **assíncrona** (recomendada para produção, via `HoodieCompactionConfig`), que mescla logs em Parquet sem bloquear a ingestão. Agende por número de commits (`hoodie.compact.inline.max.delta.commits`) ou por intervalo de tempo conforme o SLA de leitura.
+> ℹ **Hudi MOR — Compactação obrigatória:** no modo Merge On Read, as atualizações são gravadas em arquivos de log Avro e mescladas dinamicamente na leitura. Com o tempo, o acúmulo de logs degrada a performance de leitura. Existem dois modos de compactação:
+>
+> - **Inline** (`hoodie.compact.inline=true`): executada junto com cada commit, configurável por número de commits via `hoodie.compact.inline.max.delta.commits`. **Atenção:** o commit fica bloqueado até a compactação terminar — em tabelas grandes, isso pode causar latência de ingestão perceptível. Evite em produção com alta frequência de escrita.
+> - **Assíncrona** (recomendada para produção, via `HoodieCompactionConfig`): mescla logs em Parquet em background sem bloquear a ingestão. Agende por número de commits ou por intervalo de tempo conforme o SLA de leitura. Permite que escritas e leituras continuem enquanto a compactação ocorre em paralelo.
 
 ### 16.3 Time Travel e Auditoria
 
@@ -912,11 +932,13 @@ WHERE  _hoodie_commit_time <= '20240315100000';
 
 | Serviço | Provider | Bancos Suportados | Destinos Nativos | Observação | Limites/Preços Típicos |
 |---|---|---|---|---|---|
-| AWS DMS | Amazon | Oracle, SQL Server, MySQL, PostgreSQL, MongoDB | S3, Redshift, Kinesis | Snapshot + CDC contínuo; custo por instância de replicação | Instância por hora + transferência; latência segundos a minutos |
+| AWS DMS | Amazon | Oracle, SQL Server, MySQL, PostgreSQL, MongoDB | S3, Redshift, Kinesis | Snapshot + CDC contínuo; custo por instância de replicação | Instância por hora + transferência; latência tipicamente de segundos, mas pode exceder minutos com Full LOB mode ou cargas elevadas |
 | Confluent Cloud | Confluent | PostgreSQL, MySQL, SQL Server, MongoDB, Oracle | Kafka nativo | Debezium gerenciado; integração Kafka | Custo por volume de dados + conectores; latência < 1s |
 | Azure Data Factory | Microsoft | SQL Server/Azure SQL, PostgreSQL, MySQL, Oracle | ADLS, Synapse, Azure SQL | SQL Server/Azure SQL: Change Tracking; demais: log-based | Preço por execução de pipeline; latência variável |
 | Google Datastream | Google | Oracle, MySQL, PostgreSQL | BigQuery, GCS, Spanner | Totalmente serverless; integração nativa com BigQuery | Custo por volume de dados; latência < 10s |
 | Fivetran / Airbyte | SaaS / OSS | 50+ conectores | Warehouse, lakes | Airbyte open source; Fivetran gerenciado | Por volume de linhas (Fivetran); auto-gerenciado gratuito |
+
+> ⚠ **AWS DMS e latência:** o valor de latência "segundos" é válido para configurações padrão com tipos de dados simples. Com **Full LOB mode** habilitado (necessário para colunas TEXT, BLOB, CLOB) ou em cargas com alto volume de escritas, a latência pode subir para vários minutos. Avalie o modo de LOB e o tamanho de chunk antes de definir SLAs.
 
 ### 17.1 Critérios de Escolha
 
@@ -1073,10 +1095,10 @@ Os pilares que sustentam um pipeline CDC maduro em produção:
 - **Merge idempotente na Silver:** `whenMatchedDelete` antes de `whenMatchedUpdate`, deduplicação por `_offset_key` adequada ao banco de origem, e armazenamento do offset como coluna de auditoria.
 - **Snapshot incremental:** eliminação do lock global via chunk-based snapshot com watermark interno.
 - **Schema evolution gerenciada:** Schema Registry com política `BACKWARD` ou `FULL`, e ciclo de vida explícito para operações destrutivas de DDL.
-- **Segurança e PII desde a origem:** mascaramento de colunas sensíveis no conector, TLS em trânsito, criptografia em repouso e estratégia de direito ao esquecimento.
+- **Segurança e PII desde a origem:** mascaramento de colunas sensíveis no conector, crypto shredding aplicado antes da gravação na Bronze, TLS em trânsito, criptografia em repouso e estratégia de direito ao esquecimento.
 - **Monitoramento proativo:** replication slot lag, consumer lag, espaço de Binlog e alertas de schema incompatível.
 - **Testes automatizados e de resiliência:** suíte de regressão com Testcontainers cobrindo cenários críticos e falhas de infraestrutura.
-- **Escolha consciente do formato de lake:** Delta Lake, Iceberg ou Hudi conforme padrão de carga e engine de processamento.
+- **Escolha consciente do formato de lake:** Delta Lake, Iceberg ou Hudi conforme padrão de carga e engine de processamento — com atenção ao modo de compactação do Hudi MOR em produção.
 - **Dimensionamento e custos controlados:** estimativas realistas e monitoramento contínuo para ajustes.
 
 O próximo nível após o CDC maduro é a convergência com **event sourcing** na camada de aplicação — onde os próprios sistemas produtores emitem eventos como cidadãos de primeira classe, eliminando a dependência do transaction log como proxy. Mas enquanto a maioria dos sistemas produtores ainda é construída sobre bancos relacionais tradicionais, CDC log-based com Debezium continua sendo o caminho mais pragmático e robusto para construir plataformas de dados em tempo real.
@@ -1099,6 +1121,8 @@ O próximo nível após o CDC maduro é a convergência com **event sourcing** n
 | **Debezium** | Conector open source para CDC |
 | **Kafka Connect** | Framework para conectar Kafka a sistemas externos |
 | **Delta Lake / Iceberg / Hudi** | Formatos de tabela para data lakes com suporte a upsert/delete |
+| **Full LOB mode** | Modo do AWS DMS para replicar colunas de objeto grande (TEXT, BLOB, CLOB) |
+| **dropDuplicatesWithinWatermark** | Operação Spark 3.5+ para deduplicação com janela temporal limitada, evitando crescimento de estado ilimitado |
 
 ---
 
@@ -1114,7 +1138,8 @@ O próximo nível após o CDC maduro é a convergência com **event sourcing** n
 - [AWS DMS](https://aws.amazon.com/dms/)
 - [Google Datastream](https://cloud.google.com/datastream)
 - [Azure Data Factory](https://azure.microsoft.com/en-us/services/data-factory/)
+- [Spark dropDuplicatesWithinWatermark](https://spark.apache.org/docs/3.5.0/structured-streaming-programming-guide.html)
 
 ---
 
-> **Pipeline CDC maduro = log-based + Debezium + Kafka + Bronze imutável + merge idempotente com `CASE WHEN` + `whenMatchedDelete` primeiro + deduplicação por offset composto + schema evolution gerenciada + PII mascarado na origem + testes automatizados + monitoramento contínuo + resiliência validada + custo controlado.**
+> **Pipeline CDC maduro = log-based + Debezium + Kafka + Bronze imutável + merge idempotente com `CASE WHEN` + `whenMatchedDelete` primeiro + deduplicação por offset composto + `dropDuplicatesWithinWatermark` em streams longos + crypto shredding antes da Bronze + schema evolution gerenciada + PII mascarado na origem + testes automatizados + monitoramento contínuo + resiliência validada + custo controlado.**
