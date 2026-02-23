@@ -1,0 +1,55 @@
+{
+  "name": "debezium-oracle-prod",
+  "config": {
+    "connector.class": "io.debezium.connector.oracle.OracleConnector",
+
+    "database.hostname": "oracle-prod.empresa.com",
+    "database.port": "1521",
+    "database.user": "c##debezium",
+    "database.password": "${file:/opt/connect/secrets.properties:oracle.password}",
+    "database.dbname": "ORCLCDB",
+    "database.pdb.name": "ORCLPDB1",
+
+    "topic.prefix": "prod-oracle",
+
+    "schema.include.list": "SCHEMA_APP",
+    "table.include.list": "SCHEMA_APP.ORDERS,SCHEMA_APP.CUSTOMERS,SCHEMA_APP.PRODUCTS",
+
+    "log.mining.strategy": "redo_log_catalog",
+    "log.mining.continuous.mine": "true",
+    "log.mining.batch.size.default": "1000",
+    "log.mining.batch.size.max": "10000",
+    "log.mining.sleep.time.default.ms": "1000",
+    "log.mining.sleep.time.min.ms": "300",
+    "log.mining.sleep.time.max.ms": "3000",
+
+    "snapshot.mode": "initial",
+    "snapshot.locking.mode": "minimal",
+
+    "database.history.kafka.bootstrap.servers": "kafka:9092",
+    "database.history.kafka.topic": "debezium.schema-history.prod-oracle",
+
+    "decimal.handling.mode": "precise",
+    "time.precision.mode": "adaptive_time_microseconds",
+    "lob.enabled": "false",
+
+    "heartbeat.interval.ms": "10000",
+    "heartbeat.action.query": "UPDATE SCHEMA_APP.DEBEZIUM_HEARTBEAT SET TS = SYSTIMESTAMP WHERE ID = 1",
+
+    "max.queue.size": "8192",
+    "max.batch.size": "2048",
+    "max.queue.size.in.bytes": "67108864",
+
+    "errors.tolerance": "all",
+    "errors.deadletterqueue.topic.name": "dlq.debezium.prod-oracle",
+    "errors.deadletterqueue.topic.replication.factor": "3",
+    "errors.deadletterqueue.context.headers.enable": "true",
+    "errors.log.enable": "true",
+    "errors.log.include.messages": "true",
+
+    "key.converter": "io.confluent.kafka.serializers.KafkaAvroSerializer",
+    "value.converter": "io.confluent.kafka.serializers.KafkaAvroSerializer",
+    "key.converter.schema.registry.url": "http://schema-registry:8081",
+    "value.converter.schema.registry.url": "http://schema-registry:8081"
+  }
+}

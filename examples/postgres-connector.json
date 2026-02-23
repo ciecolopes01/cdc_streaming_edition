@@ -1,0 +1,51 @@
+{
+  "name": "debezium-prod-pg",
+  "config": {
+    "connector.class": "io.debezium.connector.postgresql.PostgresConnector",
+
+    "database.hostname": "pg-prod.empresa.com",
+    "database.port": "5432",
+    "database.user": "debezium",
+    "database.password": "${file:/opt/connect/secrets.properties:pg.password}",
+    "database.dbname": "mydb",
+
+    "topic.prefix": "prod-pg",
+    "plugin.name": "pgoutput",
+    "slot.name": "debezium_prod",
+    "publication.name": "debezium_pub",
+
+    "table.include.list": "public.orders,public.customers,public.products",
+
+    "snapshot.mode": "initial",
+    "snapshot.locking.mode": "minimal",
+
+    "heartbeat.interval.ms": "10000",
+    "heartbeat.action.query": "UPDATE public.debezium_heartbeat SET ts = NOW() WHERE id = 1",
+
+    "database.history.kafka.bootstrap.servers": "kafka:9092",
+    "database.history.kafka.topic": "debezium.schema-history.prod-pg",
+
+    "decimal.handling.mode": "precise",
+    "time.precision.mode": "adaptive_time_microseconds",
+    "interval.handling.mode": "string",
+
+    "max.queue.size": "8192",
+    "max.batch.size": "2048",
+    "max.queue.size.in.bytes": "67108864",
+    "poll.interval.ms": "500",
+
+    "incremental.snapshot.chunk.size": "1024",
+
+    "errors.tolerance": "all",
+    "errors.deadletterqueue.topic.name": "dlq.debezium.prod-pg",
+    "errors.deadletterqueue.topic.replication.factor": "3",
+    "errors.deadletterqueue.context.headers.enable": "true",
+    "errors.log.enable": "true",
+    "errors.log.include.messages": "true",
+
+    "key.converter": "io.confluent.kafka.serializers.KafkaAvroSerializer",
+    "value.converter": "io.confluent.kafka.serializers.KafkaAvroSerializer",
+    "key.converter.schema.registry.url": "http://schema-registry:8081",
+    "value.converter.schema.registry.url": "http://schema-registry:8081"
+  }
+}

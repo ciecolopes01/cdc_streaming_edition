@@ -1,0 +1,101 @@
+---
+title: CDC Enterprise Extreme — Full Architecture
+---
+
+%%{init: {'theme': 'base', 'themeVariables': {'primaryColor': '#1e3a5f', 'primaryTextColor': '#ffffff', 'primaryBorderColor': '#4a90d9', 'lineColor': '#4a90d9', 'secondaryColor': '#2d6a4f', 'tertiaryColor': '#f0f4f8'}}}%%
+
+flowchart TB
+
+    %% ─── SOURCE DATABASES ───────────────────────────────────────────────────
+    subgraph SRC ["🗄️  Source Databases"]
+        direction TB
+        PG["🐘 PostgreSQL\n─────────────\nWAL / LSN\nReplication Slot\npgoutput plugin"]
+        MY["🐬 MySQL\n─────────────\nBinlog / GTID\nfile + pos\nfailover-safe"]
+        SS["🪟 SQL Server\n─────────────\nCDC / CT\nchange_lsn\ncommit_lsn"]
+        MG["🍃 MongoDB\n─────────────\nChange Streams\nResume Token\nOplog"]
+        OR["🏛️ Oracle\n─────────────\nLogMiner / SCN\nRedo + Archive Logs\nSupplemental Logging"]
+    end
+
+    %% ─── KAFKA CONNECT ───────────────────────────────────────────────────────
+    subgraph KC ["⚙️  Kafka Connect Cluster"]
+        direction LR
+        CON1["Debezium\nConnector\n[PG / SS]"]
+        CON2["Debezium\nConnector\n[MySQL]"]
+        CON3["Debezium\nConnector\n[Oracle / MG]"]
+        REST["REST API\n:8083\nstatus / pause\nresume / restart"]
+    end
+
+    %% ─── KAFKA ───────────────────────────────────────────────────────────────
+    subgraph KFK ["📨  Apache Kafka"]
+        direction TB
+        SR["Schema Registry\n─────────────\nAvro\nBACKWARD_TRANSITIVE\nschema evolution"]
+
+        subgraph TOPICS ["Topics"]
+            T_CDC["CDC Topics\n─────────────\ndb.schema.table\ncleanup=compact\ndelete.retention=48h"]
+            T_HIS["Schema History\n─────────────\ncleanup=delete\nretention.ms=-1\nreplicas=3"]
+            T_HB["Heartbeat\n─────────────\nretention=1h\nidle slot protection"]
+            T_DLQ["Dead Letter Queue\n─────────────\nretention=30d\nerror tolerance"]
+        end
+    end
+
+    %% ─── PROCESSING ──────────────────────────────────────────────────────────
+    subgraph PROC ["⚡  Stream Processing"]
+        direction LR
+        DEDUP["Deduplication\n─────────────\nby _offset_key\nNOT ts_ms\nwindow function"]
+        MERGE["MERGE / UPSERT\n─────────────\nDelta Lake MERGE\nSCD Type 2\nbefore/after state"]
+    end
+
+    %% ─── LAKEHOUSE ───────────────────────────────────────────────────────────
+    subgraph LAKE ["🏠  Delta Lakehouse"]
+        direction LR
+        BZ["🥉 Bronze\n─────────────\nRaw CDC events\nImmutable\nSSE-KMS encrypted\nall operations"]
+        SV["🥈 Silver\n─────────────\nDeduplicated\nMerged state\nDELETEs applied\nPII masked"]
+        GD["🥇 Gold\n─────────────\nAggregated\nBusiness entities\nSLA ≤ 5min lag"]
+    end
+
+    %% ─── MONITORING ──────────────────────────────────────────────────────────
+    subgraph MON ["📊  Observability"]
+        direction TB
+        JMX["JMX Metrics\n─────────────\nlag bytes\nms behind source\nsnapshot state"]
+        ALERT["Alerts\n─────────────\nslot inactive\nlag > 10GB\nxid_age > 1B\ntask FAILED"]
+    end
+
+    %% ─── CONNECTIONS ─────────────────────────────────────────────────────────
+    PG  -->|"WAL streaming\nLSN offset"| CON1
+    SS  -->|"CT log polling\nchange_lsn"| CON1
+    MY  -->|"Binlog events\nGTID / file+pos"| CON2
+    MG  -->|"Oplog tailing\nresume token"| CON3
+    OR  -->|"LogMiner SQL\nSCN offset"| CON3
+
+    CON1 & CON2 & CON3 <-->|"schema\nregistration"| SR
+    CON1 & CON2 & CON3 -->|"at-least-once\nevents"| T_CDC
+    CON1 & CON2 & CON3 -->|"DDL history"| T_HIS
+    CON1 & CON2 & CON3 -->|"keep slot alive"| T_HB
+    CON1 & CON2 & CON3 -->|"deserialization\nerrors"| T_DLQ
+
+    REST -.->|"pause / resume\nrestart tasks"| CON1 & CON2 & CON3
+
+    T_CDC --> DEDUP
+    DEDUP --> MERGE
+    MERGE --> BZ
+    BZ --> SV
+    SV --> GD
+
+    KC --> JMX
+    KFK --> JMX
+    JMX --> ALERT
+
+    %% ─── STYLES ──────────────────────────────────────────────────────────────
+    classDef db        fill:#1e3a5f,stroke:#4a90d9,color:#fff,rx:8
+    classDef connector fill:#2d4a1e,stroke:#5a9a3d,color:#fff
+    classDef kafka     fill:#7b2d00,stroke:#d4600a,color:#fff
+    classDef process   fill:#4a1e5f,stroke:#9a4dd4,color:#fff
+    classDef lake      fill:#1e4a4a,stroke:#3d9a9a,color:#fff
+    classDef monitor   fill:#4a3d1e,stroke:#d4a43d,color:#fff
+
+    class PG,MY,SS,MG,OR db
+    class CON1,CON2,CON3,REST connector
+    class SR,T_CDC,T_HIS,T_HB,T_DLQ kafka
+    class DEDUP,MERGE process
+    class BZ,SV,GD lake
+    class JMX,ALERT monitor
