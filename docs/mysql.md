@@ -105,7 +105,11 @@ if source_type == 'mysql':
     return df.withColumn('_offset_key', F.coalesce(gtid, file_pos))
 ```
 
-> `source.gtid` is `null` when GTID is not enabled. The `coalesce` handles both modes transparently.
+> [!WARNING]
+> **GTID Multi-source Pitfalls**: In multi-source replication environments, `source.gtid` may contain multiple UUID ranges concatenated. Lexicographical sorting of these strings **does not guarantee global monotonic ordering**.
+>
+> **Recommended Enterprise Ordering Strategy**:
+> Use `source.ts_ms` (timestamp) combined with the offset key as a fallback for stable ordering in Silver layer MERGE operations.
 
 ---
 

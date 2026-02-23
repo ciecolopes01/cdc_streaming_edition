@@ -106,6 +106,12 @@ elif source_type == 'mongodb':
     return df.withColumn('_offset_key', F.coalesce(resume_token, fallback))
 ```
 
+> [!IMPORTANT]
+> **Priority**: Always prioritize `resume_token` for deduplication. The `ts_ms + ord` fallback is less reliable.
+
+> [!CAUTION]
+> **Clock Skew in Sharded Clusters**: In MongoDB sharded clusters, `ts_ms` is derived from `clusterTime`. Due to potential clock skew between shards, `ts_ms` is NOT guaranteed to be globally monotonic. Use `resume_token` as the only source of truth for ordering.
+
 ---
 
 ## Cluster Migration — Critical Warning

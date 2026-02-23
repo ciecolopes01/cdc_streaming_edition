@@ -145,7 +145,8 @@ kafka-topics.sh --create \
   --replication-factor 3 \
   --config cleanup.policy=delete \
   --config retention.ms=-1 \
-  --config min.insync.replicas=2
+  --config min.insync.replicas=2 \
+  --config unclean.leader.election.enable=false
 
 # NEVER use cleanup.policy=compact on history topics
 # The full ordered history of DDL events must be preserved
@@ -155,6 +156,28 @@ If the schema history topic is lost, recover with:
 ```properties
 snapshot.mode=schema_only_recovery
 ```
+
+---
+
+## Offset Reset — The Only Safe Way
+
+> [!CAUTION]
+> **Source Connectors do NOT use Consumer Groups**. Resetting a group via `kafka-consumer-groups.sh` has NO effect on a Debezium source connector. Offsets are stored in the internal `connect-offsets` topic.
+
+### Method 1: REST API (Kafka 3.5+) — Recommended
+```bash
+# 1. Stop the connector
+curl -X PUT http://kafka-connect:8083/connectors/debezium-prod-pg/pause
+
+# 2. Reset offsets
+curl -X DELETE http://kafka-connect:8083/connectors/debezium-prod-pg/offsets
+
+# 3. Resume (will start from snapshot or beginning)
+curl -X PUT http://kafka-connect:8083/connectors/debezium-prod-pg/resume
+```
+
+### Method 2: Manual (Legacy/Complex)
+Produce a NULL value to the `connect-offsets` topic using the connector name as key. This is error-prone and requires stopping ALL connect workers if using `FileOffsetBackingStore`.
 
 ---
 
@@ -222,3 +245,33 @@ ALTER TABLE orders DROP COLUMN customer_name;
 | Schema history | `delete` | `-1` | — | 1 | 3 |
 | DLQ | `delete` | `2592000000` (30d) | — | 1 | 2 |
 | Heartbeat | `delete` | `3600000` (1h) | — | 1 | 1 |
+
+---
+
+## Enterprise Roadmap — The "10/10" Architecture
+
+To reach a truly enterprise-grade CDC platform, implement the following advanced patterns:
+
+### 1. Partitioning Strategy
+For high-volume tables (> 10k events/sec):
+- Increase Kafka partitions (3–6 per table).
+- Ensure the **Kafka Key** is the Database PK to preserve ordering per entity across partitions.
+
+### 2. Transaction Metadata
+Configure `provide.transaction.metadata=true` to capture:
+- `transaction.id`: Groups events belonging to the same commit.
+- `event_count`: Number of events in the transaction.
+- Useful for building **Transactionally Consistent Views** in the Gold layer.
+
+### 3. Debezium Outbox Pattern
+Avoid dual-writes. Instead of updating the DB and calling an API, the application writes to an `outbox` table. Debezium captures this and routes it to the correct downstream topic or service.
+
+### 4. Multi-tenant Isolation
+In multi-tenant environments:
+- Use `logical_server_name` or `topic.prefix` per tenant.
+- Apply Kafka Quotas to prevent a single noisy tenant from starving others.
+
+### 5. Controlled Replay Strategy
+Never just "reset to beginning" in production.
+- Use a **Secondary Connector** with a different prefix to capture a historical replay into a separate path in Bronze.
+- Swap the directories in the Data Lakehouse only after validation.

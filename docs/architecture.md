@@ -77,8 +77,8 @@ Stores Avro schemas and enforces **compatibility rules**. Every message written 
 
 Three-layer Medallion Architecture:
 
-- **Bronze**: raw, immutable CDC events exactly as received from Kafka. Never modified. Encrypted at rest.
-- **Silver**: deduplicated, DELETEs applied, current state per entity. PII may be masked.
+- **Bronze**: raw, immutable CDC events exactly as received from Kafka. Provides a "technical replay" capability. Never modified. Encrypted at rest.
+- **Silver**: deduplicated, current state per entity. Business logic applied (e.g., DELETEs). This is where **PII masking** typically occurs to balance compliance with analytical needs.
 - **Gold**: aggregated business entities, SLA-driven freshness.
 
 ---
@@ -111,10 +111,36 @@ sequenceDiagram
 |---|---|---|
 | DB → Debezium | At-least-once | Restart may re-read events |
 | Debezium → Kafka | At-least-once | Idempotent producer reduces duplicates |
-| Kafka → Consumer | At-least-once by default | Exactly-once requires Kafka 3.3+ or consumer-side dedup |
+| Kafka → Consumer | At-least-once | Exactly-once requires Kafka 3.3+ and transactional consumers |
 | Consumer → Delta Lake | Exactly-once (with MERGE) | MERGE is idempotent by PK |
 
-**Deduplication is mandatory** in the processing layer. Always deduplicate by `_offset_key`, not `ts_ms`.
+> [!IMPORTANT]
+> **Exactly-once source is NOT exactly-once end-to-end.**
+> Even with `exactly.once.source.support=enabled`, manual offset resets or non-transactional consumers can still cause duplicates.
+
+### Deduplication Strategy
+
+Deduplication must be handled in two distinct phases:
+
+1.  **Technical Deduplication (Bronze)**: Removes exact duplicates of the same event (same `_offset_key`).
+2.  **Logical Deduplication (Silver)**: Ensures the latest state per Primary Key (PK) by using the highest monotonic offset.
+
+```python
+def deduplicate_latest_by_pk(df, pk_cols, offset_col='_offset_key'):
+    # Logical deduplication: PK + highest offset
+    window = (
+        Window
+        .partitionBy(*pk_cols)
+        .orderBy(F.col(offset_col).cast('long').desc())
+    )
+
+    return (
+        df
+        .withColumn('_rank', F.row_number().over(window))
+        .filter(F.col('_rank') == 1)
+        .drop('_rank')
+    )
+```
 
 ---
 
@@ -133,7 +159,11 @@ flowchart TD
     end
 ```
 
-> ⚠️ **Never** use `cleanup.policy=compact` on the schema history topic. It must preserve every DDL event in order — compaction would remove intermediate states needed for schema reconstruction.
+> [!WARNING]
+> **Tombstone Requirement**: For `cleanup.policy=compact` to work correctly, the Kafka message **key** must be exactly the Primary Key of the source table. Altering the key via SMTs or incorrect converters will prevent the removal of deleted records.
+
+> [!CAUTION]
+> **Never** use `cleanup.policy=compact` on the schema history topic. It must preserve every DDL event in order — compaction would remove intermediate states needed for schema reconstruction.
 
 ---
 
@@ -183,4 +213,9 @@ Every production CDC pipeline must monitor three distinct layers:
 - Topic partition count vs throughput
 - Schema Registry error rate
 
-See [operations.md](operations.md) for full monitoring configuration.
+### Incremental Snapshot Risks
+
+Use when you need to re-capture a table without restarting the connector. 
+
+> [!CAUTION]
+> **Mutable Primary Keys**: If a Primary Key is altered during an incremental snapshot, the record may appear in two different chunks, leading to logical duplicates in the target. Ensure PKs are immutable or handle this risk in the Silver layer.

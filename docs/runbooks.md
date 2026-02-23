@@ -219,9 +219,9 @@ curl -s http://kafka-connect:8083/connectors/debezium-mongodb-prod/status \
 # Step 1: Delete connector (this stops the failing restart loop)
 curl -X DELETE http://kafka-connect:8083/connectors/debezium-mongodb-prod
 
-# Step 2: Clear stored offset
-# The offset is in the internal connect-offsets topic under the connector name key
-# Use kafka-consumer-groups or a reset tool specific to your Kafka version
+# Step 2: Clear stored offset using the REST API (Kafka Connect 3.5+)
+# Source connector offsets are in connect-offsets, NOT in consumer groups
+curl -X DELETE http://kafka-connect:8083/connectors/debezium-mongodb-prod/offsets
 
 # Step 3: Recreate with full initial snapshot
 curl -X POST http://kafka-connect:8083/connectors \

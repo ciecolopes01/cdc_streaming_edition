@@ -209,23 +209,30 @@ Point Debezium at the ADG standby instead of the primary. This is the **gold sta
 from pyspark.sql import functions as F
 from pyspark.sql.window import Window
 
-def deduplicate(df, offset_col='_offset_key'):
-    """
-    Correct: partition by offset_key, order by offset_key (monotonic).
-    Wrong: partition by offset_key, order by ts_ms (not guaranteed unique).
-    """
-    window = Window.partitionBy(offset_col).orderBy(F.col(offset_col).desc())
+# Phase 1 — Technical Deduplication (Bronze)
+# Removes exact duplicate events (same _offset_key) from Kafka at-least-once delivery
+def deduplicate_technical(df, offset_col='_offset_key'):
+    return df.dropDuplicates([offset_col])   # fast, approximate; sufficient for Bronze
+
+# Phase 2 — Logical Deduplication (Silver)
+# Ensures only the LATEST version of each entity (by PK) is kept
+# Critical for replays, offset resets, and multi-source scenarios
+def deduplicate_logical(df, pk_cols, offset_col='_offset_key'):
+    window = (
+        Window
+        .partitionBy(*pk_cols)
+        .orderBy(F.col(offset_col).cast('long').desc())
+    )
     return (
         df
         .withColumn('_rank', F.row_number().over(window))
         .filter(F.col('_rank') == 1)
         .drop('_rank')
     )
-
-# For large streams: use dropDuplicates as first-pass (faster, less precise)
-# followed by MERGE for final exactly-once semantics
-df_dedup = df.dropDuplicates(['_offset_key'])   # approximate, fast
 ```
+
+> [!IMPORTANT]
+> Do NOT use `ts_ms` for ordering in deduplication. `ts_ms` is not guaranteed unique or monotonic across all CDC sources. Always use the numeric value of `_offset_key`.
 
 ### MERGE into Silver — Idempotent Upsert
 

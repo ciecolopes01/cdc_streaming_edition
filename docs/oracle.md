@@ -188,17 +188,22 @@ FETCH FIRST 20 ROWS ONLY;
 
 ```python
 elif source_type == 'oracle':
-    # commit_scn + scn ensures uniqueness even when multiple
-    # changes occur within the same commit SCN
+    # commit_scn + xid + scn ensures uniqueness.
+    # SCN alone is shared by all changes in the same transaction.
     return df.withColumn(
         '_offset_key',
         F.concat(
             F.col('source.commit_scn').cast('string'),
             F.lit('_'),
+            F.coalesce(F.col('source.xid').cast('string'), F.lit('N/A')),
+            F.lit('_'),
             F.col('source.scn').cast('string')
         )
     )
 ```
+
+> [!IMPORTANT]
+> **SCN Uniqueness**: SCN is monotonic globally, but multiple changes within the same transaction share the same `commit_scn`. In enterprise environments, always include `source.xid` (Transaction ID) and `source.scn` to guarantee unique event identification.
 
 ---
 

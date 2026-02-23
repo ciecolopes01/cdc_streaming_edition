@@ -143,6 +143,14 @@ When a replication slot is slow or inactive, PostgreSQL cannot advance the `xmin
 ### Monitoring Queries
 
 ```sql
+-- Lag and Replication Delay (Standby Only)
+SELECT
+    CASE 
+        WHEN pg_is_in_recovery() THEN now() - pg_last_xact_replay_timestamp() 
+        ELSE NULL 
+    END AS replication_delay,
+    pg_is_in_recovery() AS is_standby;
+
 -- Slot lag — alert if > 10GB
 SELECT
     slot_name,
