@@ -76,9 +76,9 @@ flowchart TB
     REST -.->|"pause / resume\nrestart tasks"| CON1 & CON2 & CON3
 
     T_CDC --> DEDUP
-    DEDUP --> MERGE
-    MERGE --> BZ
-    BZ --> SV
+    DEDUP --> BZ
+    BZ --> MERGE
+    MERGE --> SV
     SV --> GD
 
     KC --> JMX

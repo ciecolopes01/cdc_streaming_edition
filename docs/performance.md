@@ -242,14 +242,18 @@ from delta.tables import DeltaTable
 def merge_to_silver(micro_batch_df, epoch_id):
     silver = DeltaTable.forName(spark, "silver.orders")
 
+    # CASE WHEN handles DELETE events where after is null
     silver.alias("target").merge(
         micro_batch_df.alias("source"),
-        "target.id = source.id"
+        """target.id = CASE
+               WHEN source.op = 'd' THEN source.before.id
+               ELSE source.after.id
+           END"""
     ).whenMatchedDelete(
-        condition="source.op = 'd'"
+        condition="source.op = 'd'"          # DELETE first
     ).whenMatchedUpdateAll(
-        condition="source.op in ('u', 'r')"
+        condition="source.op in ('u', 'c')"  # UPDATE + idempotent INSERT replay
     ).whenNotMatchedInsertAll(
-        condition="source.op in ('c', 'r')"
+        condition="source.op in ('c', 'r')"  # INSERT + snapshot read
     ).execute()
 ```

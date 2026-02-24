@@ -40,7 +40,7 @@ EXEC sys.sp_cdc_enable_table
     @source_schema = N'dbo',
     @source_name   = N'orders',
     @role_name     = NULL,
-    @supports_net_changes = 1;
+    @supports_net_changes = 0;  -- Debezium uses "all changes"; net changes is not required
 
 -- Create Debezium user
 CREATE LOGIN debezium WITH PASSWORD = 'SecurePassword123!';
@@ -94,8 +94,8 @@ elif source_type == 'sqlserver':
     "topic.prefix": "prod-ss",
     "table.include.list": "dbo.orders,dbo.customers",
     "snapshot.mode": "initial",
-    "database.history.kafka.bootstrap.servers": "kafka:9092",
-    "database.history.kafka.topic": "debezium.schema-history.prod-ss",
+    "schema.history.internal.kafka.bootstrap.servers": "kafka:9092",
+    "schema.history.internal.kafka.topic": "debezium.schema-history.prod-ss",
     "decimal.handling.mode": "precise",
     "heartbeat.interval.ms": "10000"
   }

@@ -1,6 +1,6 @@
 # CDC Enterprise Extreme
 
-> **Production-grade Change Data Capture with Debezium — The Definitive Guide**
+> **Production-grade Change Data Capture with Debezium â€” The Definitive Guide**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Contributions Welcome](https://img.shields.io/badge/contributions-welcome-brightgreen.svg)](CONTRIBUTING.md)
@@ -8,11 +8,11 @@
 
 A community-driven, battle-tested reference for running **CDC pipelines at enterprise scale**. Built from real production incidents, iterative technical corrections, and deep peer review.
 
-Covers **PostgreSQL, MySQL, SQL Server, MongoDB, and Oracle** — with Debezium, Kafka, Schema Registry, Delta Lake, and Spark.
+Covers **PostgreSQL, MySQL, SQL Server, MongoDB, and Oracle** â€” with Debezium, Kafka, Schema Registry, Delta Lake, and Spark.
 
 ---
 
-## 📖 Documentation
+## ðŸ“– Documentation
 
 | Section | Description |
 |---|---|
@@ -23,12 +23,12 @@ Covers **PostgreSQL, MySQL, SQL Server, MongoDB, and Oracle** — with Debezium,
 | [MongoDB](docs/mongodb.md) | Resume tokens, change streams, cluster migration |
 | [Oracle](docs/oracle.md) | LogMiner, redo logs, supplemental logging, RAC |
 | [Operations](docs/operations.md) | Monitoring, connector lifecycle, DLQ, rolling restarts |
-| [Runbooks](docs/runbooks.md) | Incident response procedures — ready to use |
+| [Runbooks](docs/runbooks.md) | Incident response procedures â€” ready to use |
 | [Performance](docs/performance.md) | Debezium tuning, Kafka producer/consumer, topic config |
 
 ---
 
-## 🗺️ Architecture Overview
+## ðŸ—ºï¸ Architecture Overview
 
 ```mermaid
 flowchart LR
@@ -82,7 +82,7 @@ flowchart LR
 
 ---
 
-## 🚀 Quick Start
+## ðŸš€ Quick Start
 
 ### 1. Clone the repository
 
@@ -108,6 +108,16 @@ curl -X POST http://kafka-connect:8083/connectors \
 curl -X POST http://kafka-connect:8083/connectors \
   -H "Content-Type: application/json" \
   -d @examples/mysql-connector.json
+
+# SQL Server
+curl -X POST http://kafka-connect:8083/connectors \
+  -H "Content-Type: application/json" \
+  -d @examples/sqlserver-connector.json
+
+# MongoDB
+curl -X POST http://kafka-connect:8083/connectors \
+  -H "Content-Type: application/json" \
+  -d @examples/mongodb-connector.json
 ```
 
 ### 3. Verify connector health
@@ -118,7 +128,7 @@ curl -s http://kafka-connect:8083/connectors/debezium-prod-pg/status | jq .
 
 ---
 
-## ⚡ Key Concepts at a Glance
+## âš¡ Key Concepts at a Glance
 
 ### Offset Keys by Source
 
@@ -126,73 +136,75 @@ curl -s http://kafka-connect:8083/connectors/debezium-prod-pg/status | jq .
 |---|---|---|---|
 | PostgreSQL | WAL LSN | `source.lsn` | Monotonic per instance |
 | MySQL | Binlog position | `source.gtid` or `file:pos` | GTID preferred in HA setups |
-| SQL Server | LSN | `source.change_lsn` | NOT `source.lsn` — silent null |
-| MongoDB | Resume Token | `source.resume_token` + `ts_ms+ord` | Cluster-scoped only |
-| Oracle | SCN | `commit_scn_scn` | Unique per change |
+| SQL Server | LSN | `source.change_lsn` | NOT `source.lsn` â€” silent null |
+| MongoDB | Resume Token | `source.resume_token` | `ts_ms+ord` fallback only |
+| Oracle | SCN | `commit_scn` + `scn` + `xid` | Include XID for uniqueness |
 
 ### Critical Production Rules
 
-- ✅ Always use `cleanup.policy=compact` (not `compact,delete`) for CDC topics
-- ✅ Set `delete.retention.ms` ≥ 2× your consumer downtime SLA
-- ✅ Never use `cleanup.policy=compact` on schema history topics — use `delete` with `retention.ms=-1`
-- ✅ Use `BACKWARD_TRANSITIVE` schema compatibility, not just `BACKWARD`
-- ✅ Set `max_slot_wal_keep_size` in PostgreSQL 13+ to prevent wraparound
-- ✅ Monitor `age(datfrozenxid)` — alert at 1B, critical at 1.5B
-- ✅ Set heartbeat on all connectors — slots lag even on idle tables
-- ✅ Do NOT set `max.in.flight.requests=1` on Kafka >= 2.5 — unnecessary and kills throughput
-- ✅ Deduplicate by `_offset_key`, not `ts_ms` — timestamps are not unique under high load
+- âœ… Always use `cleanup.policy=compact` (not `compact,delete`) for CDC topics
+- âœ… Set `delete.retention.ms` â‰¥ 2Ã— your consumer downtime SLA
+- âœ… Never use `cleanup.policy=compact` on schema history topics â€” use `delete` with `retention.ms=-1`
+- âœ… Use `BACKWARD_TRANSITIVE` schema compatibility, not just `BACKWARD`
+- âœ… Set `max_slot_wal_keep_size` in PostgreSQL 13+ to prevent wraparound
+- âœ… Monitor `age(datfrozenxid)` â€” alert at 1B, critical at 1.5B
+- âœ… Set heartbeat on all connectors â€” slots lag even on idle tables
+- âœ… Do NOT set `max.in.flight.requests=1` on Kafka >= 2.5 â€” unnecessary and kills throughput
+- âœ… Deduplicate by `_offset_key`, not `ts_ms` â€” timestamps are not unique under high load
 
 ---
 
-## 📁 Repository Structure
+## ðŸ“ Repository Structure
 
 ```
 cdc-enterprise-extreme/
-│
-├── README.md               ← You are here
-├── LICENSE                 ← MIT
-├── CONTRIBUTING.md         ← How to contribute
-├── CODE_OF_CONDUCT.md      ← Community standards
-├── SECURITY.md             ← Vulnerability reporting
-│
-├── docs/
-│   ├── architecture.md     ← Pipeline design and data flow
-│   ├── postgresql.md       ← PostgreSQL-specific guide
-│   ├── mysql.md            ← MySQL-specific guide
-│   ├── oracle.md           ← Oracle LogMiner guide
-│   ├── sqlserver.md        ← SQL Server guide
-│   ├── mongodb.md          ← MongoDB change streams guide
-│   ├── operations.md       ← Monitoring, DLQ, lifecycle
-│   ├── runbooks.md         ← Incident response procedures
-│   └── performance.md      ← Tuning guide
-│
-├── diagrams/
-│   └── architecture.mmd    ← Mermaid source diagrams
-│
-└── examples/
-    ├── postgres-connector.json
-    ├── oracle-connector.json
-    └── mysql-connector.json
+â”‚
+â”œâ”€â”€ README.md               â† You are here
+â”œâ”€â”€ LICENSE                 â† MIT
+â”œâ”€â”€ CONTRIBUTING.md         â† How to contribute
+â”œâ”€â”€ CODE_OF_CONDUCT.md      â† Community standards
+â”œâ”€â”€ SECURITY.md             â† Vulnerability reporting
+â”‚
+â”œâ”€â”€ docs/
+â”‚   â”œâ”€â”€ architecture.md     â† Pipeline design and data flow
+â”‚   â”œâ”€â”€ postgresql.md       â† PostgreSQL-specific guide
+â”‚   â”œâ”€â”€ mysql.md            â† MySQL-specific guide
+â”‚   â”œâ”€â”€ oracle.md           â† Oracle LogMiner guide
+â”‚   â”œâ”€â”€ sqlserver.md        â† SQL Server guide
+â”‚   â”œâ”€â”€ mongodb.md          â† MongoDB change streams guide
+â”‚   â”œâ”€â”€ operations.md       â† Monitoring, DLQ, lifecycle
+â”‚   â”œâ”€â”€ runbooks.md         â† Incident response procedures
+â”‚   â””â”€â”€ performance.md      â† Tuning guide
+â”‚
+â”œâ”€â”€ diagrams/
+â”‚   â””â”€â”€ architecture.mmd    â† Mermaid source diagrams
+â”‚
+â””â”€â”€ examples/
+    â”œâ”€â”€ postgres-connector.json
+    â”œâ”€â”€ oracle-connector.json
+    â”œâ”€â”€ mysql-connector.json
+    â”œâ”€â”€ sqlserver-connector.json
+    â””â”€â”€ mongodb-connector.json
 ```
 
 ---
 
-## 🔥 Post-Mortems Included
+## ðŸ”¥ Post-Mortems Included
 
 Real incidents, root causes, and lessons learned:
 
-- **PM-001**: Inactive slot caused PostgreSQL wraparound — 47min write outage
-- **PM-002**: Uncommmunicated DDL broke 23 consumers simultaneously
-- **PM-003**: Tombstone removed by `retention.ms` — ghost data survived in Silver layer
+- **PM-001**: Inactive slot caused PostgreSQL wraparound â€” 47min write outage
+- **PM-002**: Uncommunicated DDL broke 23 consumers simultaneously
+- **PM-003**: Tombstone removed by `retention.ms` â€” ghost data survived in Silver layer
 - **PM-004**: MongoDB resume token invalid after cluster migration
-- **PM-005**: Oracle archive log deleted by RMAN before Debezium read — forced 8h re-snapshot
+- **PM-005**: Oracle archive log deleted by RMAN before Debezium read â€” forced 8h re-snapshot
 - **PM-006**: Oracle RAC redo log inaccessible after ASM mount failure
 
 Full details in [docs/runbooks.md](docs/runbooks.md).
 
 ---
 
-## 🤝 Contributing
+## ðŸ¤ Contributing
 
 We welcome contributions! Please read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a PR.
 
@@ -204,12 +216,12 @@ Areas where help is most needed:
 
 ---
 
-## 📄 License
+## ðŸ“„ License
 
-MIT — see [LICENSE](LICENSE).
+MIT â€” see [LICENSE](LICENSE).
 
 ---
 
-## ⭐ Star History
+## â­ Star History
 
 If this project saved you from a production incident, please give it a star. It helps others find this resource.

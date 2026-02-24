@@ -2,45 +2,37 @@
   "name": "debezium-mysql-prod",
   "config": {
     "connector.class": "io.debezium.connector.mysql.MySqlConnector",
-
     "database.hostname": "mysql-prod.empresa.com",
     "database.port": "3306",
     "database.user": "debezium",
     "database.password": "${file:/opt/connect/secrets.properties:mysql.password}",
     "database.server.id": "184054",
-
     "topic.prefix": "prod-mysql",
-
     "database.include.list": "mydb",
     "table.include.list": "mydb.orders,mydb.customers,mydb.products",
-
     "snapshot.mode": "initial",
-
+    "tombstones.on.delete": "true",
     "heartbeat.interval.ms": "10000",
     "heartbeat.action.query": "UPDATE mydb.debezium_heartbeat SET ts = NOW() WHERE id = 1",
-
-    "database.history.kafka.bootstrap.servers": "kafka:9092",
-    "database.history.kafka.topic": "debezium.schema-history.prod-mysql",
-
+    "signal.data.collection": "mydb.debezium_signals",
+    "schema.history.internal.kafka.bootstrap.servers": "kafka:9092",
+    "schema.history.internal.kafka.topic": "debezium.schema-history.prod-mysql",
     "decimal.handling.mode": "precise",
     "time.precision.mode": "adaptive_time_microseconds",
     "include.schema.changes": "true",
     "bigint.unsigned.handling.mode": "long",
-
     "max.queue.size": "8192",
     "max.batch.size": "2048",
     "max.queue.size.in.bytes": "67108864",
     "poll.interval.ms": "500",
-
     "errors.tolerance": "all",
     "errors.deadletterqueue.topic.name": "dlq.debezium.prod-mysql",
     "errors.deadletterqueue.topic.replication.factor": "3",
     "errors.deadletterqueue.context.headers.enable": "true",
     "errors.log.enable": "true",
     "errors.log.include.messages": "true",
-
-    "key.converter": "io.confluent.kafka.serializers.KafkaAvroSerializer",
-    "value.converter": "io.confluent.kafka.serializers.KafkaAvroSerializer",
+    "key.converter": "io.confluent.connect.avro.AvroConverter",
+    "value.converter": "io.confluent.connect.avro.AvroConverter",
     "key.converter.schema.registry.url": "http://schema-registry:8081",
     "value.converter.schema.registry.url": "http://schema-registry:8081"
   }

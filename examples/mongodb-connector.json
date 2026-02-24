@@ -1,0 +1,28 @@
+{
+    "name": "debezium-mongodb-prod",
+    "config": {
+        "connector.class": "io.debezium.connector.mongodb.MongoDbConnector",
+        "mongodb.connection.string": "mongodb://debezium:${file:/opt/connect/secrets.properties:mongo.password}@mongo-prod-01.empresa.com:27017,mongo-prod-02.empresa.com:27017,mongo-prod-03.empresa.com:27017/?replicaSet=rs0&authSource=admin",
+        "topic.prefix": "prod-mongo",
+        "collection.include.list": "mydb.orders,mydb.customers,mydb.products",
+        "capture.mode": "change_streams_update_full_with_pre_image",
+        "snapshot.mode": "initial",
+        "tombstones.on.delete": "true",
+        "heartbeat.interval.ms": "10000",
+        "signal.data.collection": "mydb.debezium_signals",
+        "max.queue.size": "8192",
+        "max.batch.size": "2048",
+        "max.queue.size.in.bytes": "67108864",
+        "poll.interval.ms": "500",
+        "errors.tolerance": "all",
+        "errors.deadletterqueue.topic.name": "dlq.debezium.prod-mongo",
+        "errors.deadletterqueue.topic.replication.factor": "3",
+        "errors.deadletterqueue.context.headers.enable": "true",
+        "errors.log.enable": "true",
+        "errors.log.include.messages": "true",
+        "key.converter": "io.confluent.connect.avro.AvroConverter",
+        "value.converter": "io.confluent.connect.avro.AvroConverter",
+        "key.converter.schema.registry.url": "http://schema-registry:8081",
+        "value.converter.schema.registry.url": "http://schema-registry:8081"
+    }
+}
