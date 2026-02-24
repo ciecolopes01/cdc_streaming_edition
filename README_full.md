@@ -1,6 +1,6 @@
-# Change Data Capture — Guia de Produção (2026)
+# Change Data Capture -- Guia de Produção (2026)
 
-> **Foco em produção real.** Este guia não é uma introdução conceitual — é um manual de implementação com garantias fortes, resiliência operacional e governança adequada.
+> **Foco em produção real.** Este guia não é uma introdução conceitual -- é um manual de implementação com garantias fortes, resiliência operacional e governança adequada.
 
 ---
 
@@ -11,13 +11,13 @@
 3. [Quando Não Usar CDC Log-based](#3-quando-não-usar-cdc-log-based)
 4. [Níveis de Maturidade do CDC](#4-níveis-de-maturidade-do-cdc)
 5. [Arquitetura CDC com Kafka e Streaming](#5-arquitetura-cdc-com-kafka-e-streaming)
-6. [Banco de Origem — Detalhamento Técnico](#6-banco-de-origem--detalhamento-técnico)
-7. [Debezium — Configuração Correta](#7-debezium--configuração-correta)
+6. [Banco de Origem -- Detalhamento Técnico](#6-banco-de-origem--detalhamento-técnico)
+7. [Debezium -- Configuração Correta](#7-debezium--configuração-correta)
 8. [Formato de Evento no Tópico Kafka](#8-formato-de-evento-no-tópico-kafka)
-9. [Camada Bronze — A Fundação Imutável](#9-camada-bronze--a-fundação-imutável)
+9. [Camada Bronze -- A Fundação Imutável](#9-camada-bronze--a-fundação-imutável)
 10. [Camadas Silver e Gold](#10-camadas-silver-e-gold)
 11. [Semânticas de Entrega e Idempotência](#11-semânticas-de-entrega-e-idempotência)
-12. [Snapshot Inicial — Consistência e Estratégias](#12-snapshot-inicial--consistência-e-estratégias)
+12. [Snapshot Inicial -- Consistência e Estratégias](#12-snapshot-inicial--consistência-e-estratégias)
 13. [Schema Evolution — DDL no Banco de Origem](#13-schema-evolution--ddl-no-banco-de-origem)
 14. [Segurança, PII e Conformidade](#14-segurança-pii-e-conformidade)
 15. [Modos de Deploy do Debezium](#15-modos-de-deploy-do-debezium)
@@ -115,18 +115,24 @@ Evite stacks legadas. CDC é extremamente sensível ao comportamento interno de 
 [ Banco de Dados: PostgreSQL / MySQL / SQL Server / MongoDB / Oracle ]
           |
           v
-[ Debezium Connector ]  ←  lê o transaction log continuamente
+[ Debezium Connector ]  <-  lê o transaction log continuamente
           |
-          v
-[ Kafka Topic por Tabela ]  ex: dbserver1.public.orders
-          |
-    +------+-------+-------+
-    |              |       |
-    v              v       v
-[ Bronze Lake ] [Flink]  [ML Pipeline]
+    +-----+------+
+    |             |
+    v             v
+[ Kafka Topics ]  [ DLQ (erros) ]
     |
     v
-[ Silver: merge/dedup idempotente ]
+[ Dedup por _offset_key ]
+    |
+    v
+[ Bronze Lake (imutável, SSE-KMS) ]
+    |
+    v
+[ MERGE / UPSERT idempotente ]
+    |
+    v
+[ Silver: estado atual, PII mascarada ]
     |
     v
 [ Gold: modelo analítico ]
@@ -139,16 +145,72 @@ Evite stacks legadas. CDC é extremamente sensível ao comportamento interno de 
   - **Hot partitions:** PKs com baixa cardinalidade podem gerar partições com volume desproporcional. Monitore throughput por partição.
   - **Chave composta:** quando a PK é composta (ex: `(tenant_id, order_id)`), o consumer deve usar a chave completa para ordenação.
   - **Mudança de PK em produção:** é equivalente a reprocessamento full. Planeje como uma migração completa.
-- **Schema Registry:** integração com Confluent Schema Registry ou AWS Glue para versionamento de schemas.
+- **Schema Registry:** integração com Confluent Schema Registry ou AWS Glue para versionamento de schemas. Use `BACKWARD_TRANSITIVE` como política de compatibilidade.
 - **Idempotência do produtor:** a partir do Kafka 3.0, `enable.idempotence=true` é o padrão.
 
 > ℹ **Alterar a message key sem cuidado quebra a garantia de ordering por entidade.**
 
+### 5.2 Configuração de Tópicos CDC
+
+| Tipo de tópico | `cleanup.policy` | `retention.ms` | `delete.retention.ms` | Partições | Réplicas |
+|---|---|---|---|---|---|
+| CDC data (alto volume) | `compact` | `-1` | `604800000` (7d) | 3-6 | 3 |
+| CDC data (baixo volume) | `compact` | `-1` | `172800000` (48h) | 1 | 3 |
+| Schema history | `delete` | `-1` | — | 1 | 3 |
+| Heartbeat | `delete` | `3600000` (1h) | — | 1 | 3 |
+| Dead Letter Queue | `delete` | `2592000000` (30d) | — | 1 | 3 |
+
+> ✗ **Nunca** use `cleanup.policy=compact,delete` para tópicos CDC. `retention.ms` pode apagar tombstones antes do consumer processá-las, causando ghost data na Silver (ver PM-003).
+
+```bash
+# Exemplo: criar tópico CDC de alto volume
+kafka-topics.sh --create \
+  --bootstrap-server kafka:9092 \
+  --topic prod-pg.public.orders \
+  --partitions 6 \
+  --replication-factor 3 \
+  --config cleanup.policy=compact \
+  --config delete.retention.ms=604800000 \
+  --config segment.ms=3600000 \
+  --config min.cleanable.dirty.ratio=0.1 \
+  --config compression.type=lz4
+```
+
+### 5.3 Dead Letter Queue (DLQ)
+
+Eventos que falham na serialização são redirecionados para a DLQ em vez de travar o conector:
+
+```bash
+# Inspecionar mensagens da DLQ
+kafka-console-consumer.sh --bootstrap-server kafka:9092 \
+  --topic dlq.debezium.prod-pg \
+  --from-beginning \
+  --max-messages 100 \
+  --property print.headers=true
+```
+
+### 5.4 Operações via REST API
+
+```bash
+# Status do conector
+curl -s http://kafka-connect:8083/connectors/debezium-prod-pg/status | jq .
+
+# Reiniciar task falhada
+curl -X POST http://kafka-connect:8083/connectors/debezium-prod-pg/tasks/0/restart
+
+# Pausar / Resumir
+curl -X PUT http://kafka-connect:8083/connectors/debezium-prod-pg/pause
+curl -X PUT http://kafka-connect:8083/connectors/debezium-prod-pg/resume
+
+# Limpar offsets (Kafka Connect 3.5+)
+curl -X DELETE http://kafka-connect:8083/connectors/debezium-prod-pg/offsets
+```
+
 ---
 
-## 6. Banco de Origem — Detalhamento Técnico
+## 6. Banco de Origem -- Detalhamento Técnico
 
-### 6.1 PostgreSQL — Logical Decoding + WAL
+### 6.1 PostgreSQL -- Logical Decoding + WAL
 
 #### Requisitos
 
@@ -185,7 +247,7 @@ FROM   pg_replication_slots;
 
 ---
 
-### 6.2 MySQL / MariaDB — Binlog ROW Format
+### 6.2 MySQL / MariaDB -- Binlog ROW Format
 
 ```ini
 # MySQL 5.7
@@ -216,7 +278,7 @@ retenção mínima (s) = tempo_máximo_inatividade + janela_SLA_recuperação + 
 
 ---
 
-### 6.3 SQL Server — CDC Nativo
+### 6.3 SQL Server -- CDC Nativo
 
 ```sql
 EXEC sys.sp_cdc_enable_db;
@@ -235,7 +297,7 @@ EXEC sys.sp_cdc_enable_table
 
 ---
 
-### 6.4 MongoDB — Change Streams
+### 6.4 MongoDB -- Change Streams
 
 ```javascript
 const changeStream = db.orders.watch([
@@ -252,50 +314,287 @@ const changeStream = db.orders.watch([
 
 ---
 
-## 7. Debezium — Configuração Correta
+### 6.5 Oracle -- LogMiner
+
+Oracle CDC via Debezium usa o utilitário nativo **LogMiner** para ler Redo e Archive Logs.
+
+#### Pré-requisitos
+
+```sql
+-- Archive Log Mode (requer restart)
+ALTER DATABASE ARCHIVELOG;
+
+-- Supplemental Logging
+ALTER DATABASE ADD SUPPLEMENTAL LOG DATA;
+ALTER DATABASE ADD SUPPLEMENTAL LOG DATA (ALL) COLUMNS;
+
+-- Criar usuário Debezium (CDB)
+CREATE USER c##debezium IDENTIFIED BY "${DEBEZIUM_PASSWORD}";
+GRANT CREATE SESSION, SELECT ANY TABLE, SELECT_CATALOG_ROLE,
+      EXECUTE_CATALOG_ROLE, LOGMINING TO c##debezium CONTAINER=ALL;
+```
+
+#### RMAN -- Retenção de Archive Logs
+
+```bash
+# Mínimo 7 dias (ou 2× janela de inatividade do conector)
+rman target / <<EOF
+CONFIGURE ARCHIVELOG RETENTION POLICY TO RECOVERY WINDOW OF 7 DAYS;
+EOF
+```
+
+> ✗ **Se o RMAN deletar archive logs antes do Debezium ler, o conector falha com `ORA-01291`.** A única recuperação é re-snapshot completo.
+
+#### ADG Standby (Recomendado)
+
+Em ambiente enterprise, aponte o Debezium para um **Active Data Guard Standby** em vez do primário. Zero impacto de LogMiner na workload de produção.
+
+```json
+{
+  "database.hostname": "oracle-adg-standby.empresa.com"
+}
+```
+
+### 6.6 Heartbeat -- Inegociável
+
+Heartbeat é obrigatório em **todos** os conectores, especialmente em tabelas com baixo tráfego. Sem heartbeat:
+
+- PostgreSQL: replication slot não avança → WAL acumula → disk full
+- MySQL: posição do binlog não avança → binlogs não são purgados
+- Oracle: SCN não avança → archive logs retidos desnecessariamente
+
+```properties
+heartbeat.interval.ms=10000
+heartbeat.action.query=UPDATE public.debezium_heartbeat SET ts = NOW() WHERE id = 1
+```
+
+> ⚠ **Monitore `MilliSecondsBehindSource` via JMX.** Se crescer consistentemente, investigue conectividade, performance do banco e consumer lag.
+
+---
+
+## 7. Debezium -- Configuração Correta
 
 ### 7.1 PostgreSQL
 
 ```json
 {
-  "connector.class": "io.debezium.connector.postgresql.PostgresConnector",
-  "database.hostname": "postgres",
-  "database.port": "5432",
-  "database.user": "debezium",
-  "database.password": "${file:/opt/connect/secrets.properties:pg.password}",
-  "database.dbname": "appdb",
-  "plugin.name": "pgoutput",
-  "publication.name": "dbz_publication",
-  "slot.name": "dbz_slot",
-  "snapshot.mode": "initial",
-  "tombstones.on.delete": "true",
-  "topic.prefix": "dbserver1",
-  "signal.data.collection": "public.debezium_signals",
-  "schema.history.internal.kafka.bootstrap.servers": "kafka:9092",
-  "schema.history.internal.kafka.topic": "schema-changes.orders"
+  "name": "debezium-prod-pg",
+  "config": {
+    "connector.class": "io.debezium.connector.postgresql.PostgresConnector",
+    "database.hostname": "pg-prod.empresa.com",
+    "database.port": "5432",
+    "database.user": "debezium",
+    "database.password": "${file:/opt/connect/secrets.properties:pg.password}",
+    "database.dbname": "mydb",
+    "topic.prefix": "prod-pg",
+    "plugin.name": "pgoutput",
+    "slot.name": "debezium_prod",
+    "publication.name": "debezium_pub",
+    "table.include.list": "public.orders,public.customers,public.products",
+    "snapshot.mode": "initial",
+    "snapshot.locking.mode": "minimal",
+    "tombstones.on.delete": "true",
+    "heartbeat.interval.ms": "10000",
+    "heartbeat.action.query": "UPDATE public.debezium_heartbeat SET ts = NOW() WHERE id = 1",
+    "signal.data.collection": "public.debezium_signals",
+    "incremental.snapshot.chunk.size": "1024",
+    "decimal.handling.mode": "precise",
+    "time.precision.mode": "adaptive_time_microseconds",
+    "max.queue.size": "8192",
+    "max.batch.size": "2048",
+    "max.queue.size.in.bytes": "67108864",
+    "poll.interval.ms": "500",
+    "errors.tolerance": "all",
+    "errors.deadletterqueue.topic.name": "dlq.debezium.prod-pg",
+    "errors.deadletterqueue.topic.replication.factor": "3",
+    "errors.deadletterqueue.context.headers.enable": "true",
+    "errors.log.enable": "true",
+    "errors.log.include.messages": "true",
+    "key.converter": "io.confluent.connect.avro.AvroConverter",
+    "value.converter": "io.confluent.connect.avro.AvroConverter",
+    "key.converter.schema.registry.url": "http://schema-registry:8081",
+    "value.converter.schema.registry.url": "http://schema-registry:8081"
+  }
 }
 ```
 
-### 7.2 MySQL / SQL Server (Debezium 2.x)
+> PostgreSQL com `pgoutput` **não precisa** de `schema.history.internal.*` — essas propriedades são exclusivas de MySQL, SQL Server e Oracle que usam schema history topic.
+
+### 7.2 MySQL
 
 > ⚠ **Debezium 2.x:** `database.dbname` foi substituído por `database.names`. Usar `database.dbname` pode causar falha silenciosa.
 
 ```json
 {
-  "connector.class": "io.debezium.connector.sqlserver.SqlServerConnector",
-  "database.hostname": "sqlserver",
-  "database.port": "1433",
-  "database.user": "debezium",
-  "database.password": "${file:/opt/connect/secrets.properties:ss.password}",
-  "database.names": "appdb",
-  "schema.history.internal.kafka.bootstrap.servers": "kafka:9092",
-  "schema.history.internal.kafka.topic": "schema-changes.orders",
-  "table.include.list": "dbo.orders",
-  "topic.prefix": "dbserver1",
-  "tombstones.on.delete": "true",
-  "signal.data.collection": "dbo.debezium_signals"
+  "name": "debezium-mysql-prod",
+  "config": {
+    "connector.class": "io.debezium.connector.mysql.MySqlConnector",
+    "database.hostname": "mysql-prod.empresa.com",
+    "database.port": "3306",
+    "database.user": "debezium",
+    "database.password": "${file:/opt/connect/secrets.properties:mysql.password}",
+    "database.server.id": "184054",
+    "topic.prefix": "prod-mysql",
+    "database.include.list": "mydb",
+    "table.include.list": "mydb.orders,mydb.customers,mydb.products",
+    "snapshot.mode": "initial",
+    "tombstones.on.delete": "true",
+    "heartbeat.interval.ms": "10000",
+    "heartbeat.action.query": "UPDATE mydb.debezium_heartbeat SET ts = NOW() WHERE id = 1",
+    "signal.data.collection": "mydb.debezium_signals",
+    "schema.history.internal.kafka.bootstrap.servers": "kafka:9092",
+    "schema.history.internal.kafka.topic": "debezium.schema-history.prod-mysql",
+    "decimal.handling.mode": "precise",
+    "time.precision.mode": "adaptive_time_microseconds",
+    "include.schema.changes": "true",
+    "max.queue.size": "8192",
+    "max.batch.size": "2048",
+    "max.queue.size.in.bytes": "67108864",
+    "poll.interval.ms": "500",
+    "errors.tolerance": "all",
+    "errors.deadletterqueue.topic.name": "dlq.debezium.prod-mysql",
+    "errors.deadletterqueue.topic.replication.factor": "3",
+    "errors.deadletterqueue.context.headers.enable": "true",
+    "errors.log.enable": "true",
+    "errors.log.include.messages": "true",
+    "key.converter": "io.confluent.connect.avro.AvroConverter",
+    "value.converter": "io.confluent.connect.avro.AvroConverter",
+    "key.converter.schema.registry.url": "http://schema-registry:8081",
+    "value.converter.schema.registry.url": "http://schema-registry:8081"
+  }
 }
 ```
+
+### 7.3 SQL Server
+
+```json
+{
+  "name": "debezium-sqlserver-prod",
+  "config": {
+    "connector.class": "io.debezium.connector.sqlserver.SqlServerConnector",
+    "database.hostname": "sqlserver-prod.empresa.com",
+    "database.port": "1433",
+    "database.user": "debezium",
+    "database.password": "${file:/opt/connect/secrets.properties:ss.password}",
+    "database.names": "mydb",
+    "topic.prefix": "prod-ss",
+    "table.include.list": "dbo.orders,dbo.customers,dbo.products",
+    "snapshot.mode": "initial",
+    "tombstones.on.delete": "true",
+    "heartbeat.interval.ms": "10000",
+    "heartbeat.action.query": "UPDATE dbo.debezium_heartbeat SET ts = GETUTCDATE() WHERE id = 1",
+    "signal.data.collection": "dbo.debezium_signals",
+    "schema.history.internal.kafka.bootstrap.servers": "kafka:9092",
+    "schema.history.internal.kafka.topic": "debezium.schema-history.prod-ss",
+    "decimal.handling.mode": "precise",
+    "time.precision.mode": "adaptive_time_microseconds",
+    "max.queue.size": "8192",
+    "max.batch.size": "2048",
+    "max.queue.size.in.bytes": "67108864",
+    "poll.interval.ms": "500",
+    "errors.tolerance": "all",
+    "errors.deadletterqueue.topic.name": "dlq.debezium.prod-ss",
+    "errors.deadletterqueue.topic.replication.factor": "3",
+    "errors.deadletterqueue.context.headers.enable": "true",
+    "errors.log.enable": "true",
+    "errors.log.include.messages": "true",
+    "key.converter": "io.confluent.connect.avro.AvroConverter",
+    "value.converter": "io.confluent.connect.avro.AvroConverter",
+    "key.converter.schema.registry.url": "http://schema-registry:8081",
+    "value.converter.schema.registry.url": "http://schema-registry:8081"
+  }
+}
+```
+
+> ⚠ **SQL Server:** use `source.change_lsn` para deduplicação, **não** `source.lsn`. O campo genérico retorna `null` silenciosamente.
+
+### 7.4 MongoDB
+
+```json
+{
+  "name": "debezium-mongodb-prod",
+  "config": {
+    "connector.class": "io.debezium.connector.mongodb.MongoDbConnector",
+    "mongodb.connection.string": "mongodb://debezium:${file:/opt/connect/secrets.properties:mongo.password}@mongo-prod:27017/?replicaSet=rs0&authSource=admin",
+    "topic.prefix": "prod-mongo",
+    "database.include.list": "mydb",
+    "collection.include.list": "mydb.orders,mydb.customers,mydb.products",
+    "capture.mode": "change_streams_update_full",
+    "snapshot.mode": "initial",
+    "tombstones.on.delete": "true",
+    "heartbeat.interval.ms": "10000",
+    "signal.data.collection": "mydb.debezium_signals",
+    "max.queue.size": "8192",
+    "max.batch.size": "2048",
+    "max.queue.size.in.bytes": "67108864",
+    "poll.interval.ms": "500",
+    "errors.tolerance": "all",
+    "errors.deadletterqueue.topic.name": "dlq.debezium.prod-mongo",
+    "errors.deadletterqueue.topic.replication.factor": "3",
+    "errors.deadletterqueue.context.headers.enable": "true",
+    "errors.log.enable": "true",
+    "errors.log.include.messages": "true",
+    "key.converter": "io.confluent.connect.avro.AvroConverter",
+    "value.converter": "io.confluent.connect.avro.AvroConverter",
+    "key.converter.schema.registry.url": "http://schema-registry:8081",
+    "value.converter.schema.registry.url": "http://schema-registry:8081"
+  }
+}
+```
+
+> Para MongoDB **6.0+**, use `capture.mode=change_streams_update_full_with_pre_image` para obter o estado `before` completo nos UPDATEs.
+
+### 7.5 Oracle
+
+```json
+{
+  "name": "debezium-oracle-prod",
+  "config": {
+    "connector.class": "io.debezium.connector.oracle.OracleConnector",
+    "database.hostname": "oracle-prod.empresa.com",
+    "database.port": "1521",
+    "database.user": "c##debezium",
+    "database.password": "${file:/opt/connect/secrets.properties:oracle.password}",
+    "database.dbname": "ORCLCDB",
+    "database.pdb.name": "ORCLPDB1",
+    "topic.prefix": "prod-oracle",
+    "schema.include.list": "SCHEMA_APP",
+    "table.include.list": "SCHEMA_APP.ORDERS,SCHEMA_APP.CUSTOMERS,SCHEMA_APP.PRODUCTS",
+    "log.mining.strategy": "redo_log_catalog",
+    "log.mining.batch.size.default": "1000",
+    "log.mining.batch.size.max": "10000",
+    "log.mining.sleep.time.default.ms": "1000",
+    "log.mining.sleep.time.min.ms": "300",
+    "log.mining.sleep.time.max.ms": "3000",
+    "snapshot.mode": "initial",
+    "snapshot.locking.mode": "minimal",
+    "tombstones.on.delete": "true",
+    "signal.data.collection": "SCHEMA_APP.DEBEZIUM_SIGNALS",
+    "schema.history.internal.kafka.bootstrap.servers": "kafka:9092",
+    "schema.history.internal.kafka.topic": "debezium.schema-history.prod-oracle",
+    "decimal.handling.mode": "precise",
+    "time.precision.mode": "adaptive_time_microseconds",
+    "lob.enabled": "false",
+    "heartbeat.interval.ms": "10000",
+    "heartbeat.action.query": "UPDATE SCHEMA_APP.DEBEZIUM_HEARTBEAT SET TS = SYSTIMESTAMP WHERE ID = 1",
+    "max.queue.size": "8192",
+    "max.batch.size": "2048",
+    "max.queue.size.in.bytes": "67108864",
+    "errors.tolerance": "all",
+    "errors.deadletterqueue.topic.name": "dlq.debezium.prod-oracle",
+    "errors.deadletterqueue.topic.replication.factor": "3",
+    "errors.deadletterqueue.context.headers.enable": "true",
+    "errors.log.enable": "true",
+    "errors.log.include.messages": "true",
+    "key.converter": "io.confluent.connect.avro.AvroConverter",
+    "value.converter": "io.confluent.connect.avro.AvroConverter",
+    "key.converter.schema.registry.url": "http://schema-registry:8081",
+    "value.converter.schema.registry.url": "http://schema-registry:8081"
+  }
+}
+```
+
+> ⚠ **Oracle LogMiner** consome CPU/IO significativo no banco. Em ambiente enterprise, aponte o Debezium para um **Active Data Guard Standby** em vez do primário.
 
 > ℹ **`tombstones.on.delete=true`** publica um evento tombstone (valor `null`) após cada DELETE, necessário para tópicos com `cleanup.policy=compact`.
 
@@ -342,7 +641,7 @@ Payload completo de um UPDATE:
 
 ---
 
-## 9. Camada Bronze — A Fundação Imutável
+## 9. Camada Bronze -- A Fundação Imutável
 
 A Bronze armazena eventos exatamente como chegaram, sem transformação, deduplicação ou merge. Cada registro deve conter:
 
@@ -359,7 +658,7 @@ A Bronze armazena eventos exatamente como chegaram, sem transformação, dedupli
 
 ## 10. Camadas Silver e Gold
 
-### 10.1 Silver — Merge Incremental Correto e Idempotente
+### 10.1 Silver -- Merge Incremental Correto e Idempotente
 
 **✗ Bug comum — acesso direto a `after.id`:**
 
@@ -470,7 +769,7 @@ bronze_stream.writeStream \
 
 > ⚠ **No SQL Server, use `source.change_lsn`**, não `source.lsn`. O campo genérico `source.lsn` **não existe** no payload do SQL Server e retorna `null` silenciosamente.
 
-### 10.2 Gold — Modelo Analítico
+### 10.2 Gold -- Modelo Analítico
 
 A Gold entrega agregações, dimensões e fatos modelados para BI, APIs ou ML. Pode ser reconstruída a qualquer momento a partir da Bronze.
 
@@ -478,7 +777,7 @@ A Gold entrega agregações, dimensões e fatos modelados para BI, APIs ou ML. P
 
 ## 11. Semânticas de Entrega e Idempotência
 
-### 11.1 At-Least-Once — Padrão Debezium
+### 11.1 At-Least-Once -- Padrão Debezium
 
 O Debezium garante *at-least-once delivery*: em caso de falha, alguns eventos podem ser republicados. Idempotência é implementada via:
 
@@ -506,7 +805,7 @@ exactly.once.source.support=enabled
 
 ---
 
-## 12. Snapshot Inicial — Consistência e Estratégias
+## 12. Snapshot Inicial -- Consistência e Estratégias
 
 ### 12.1 O Problema de Consistência
 
@@ -522,13 +821,13 @@ O Debezium adquire lock de leitura durante o snapshot. Após o snapshot, retoma 
 {
   "snapshot.mode": "initial",
   "incremental.snapshot.chunk.size": 1024,
-  "signal.data.collection": "debezium.signals"
+  "signal.data.collection": "public.debezium_signals"
 }
 ```
 
 ```sql
 -- Disparar snapshot incremental via tabela de sinais
-INSERT INTO debezium.signals (id, type, data)
+INSERT INTO public.debezium_signals (id, type, data)
 VALUES ('snap-001', 'execute-snapshot',
         '{"data-collections": ["public.orders"]}');
 ```
@@ -541,7 +840,7 @@ Para tabelas muito grandes (centenas de GBs), exporte via `COPY TO` / `mysqldump
 
 ---
 
-## 13. Schema Evolution — DDL no Banco de Origem
+## 13. Schema Evolution -- DDL no Banco de Origem
 
 | Operação DDL | PostgreSQL | MySQL | SQL Server |
 |---|---|---|---|
@@ -957,7 +1256,7 @@ Simule com Testcontainers ou staging:
 
 ---
 
-## 25. Incidentes Reais Comuns
+## 25. Incidentes Reais -- Post-Mortems
 
 | Problema | Causa Raiz | Mitigação |
 |---|---|---|
@@ -968,8 +1267,55 @@ Simule com Testcontainers ou staging:
 | Ordering quebrado | PK alterada ou message key incorreta | Nunca alterar PK sem plano |
 | DELETE não aplicado | Merge usando `after.id` sem CASE WHEN | Usar `CASE WHEN b.op = 'd'` |
 | OOM no Spark | `dropDuplicates` sem watermark | `dropDuplicatesWithinWatermark` |
-| Conector não inicia pós-2.x | `database.dbname` → `database.names` | Validar todas as props |
-| Silver corrompida pós-PK | PK antiga e nova = entidades distintas | Alterar PK = reprocessamento full |
+| Conector não inicia pós-2.x | `database.dbname` -> `database.names` | Validar todas as props |
+
+### PM-001 -- Slot Inativo -> Wraparound (47min outage de escrita)
+
+Conector caiu silenciosamente após rotação de credenciais. Slot permaneceu inativo por 72h. WAL cresceu para 180GB. `xid_age` atingiu 1.8B. PostgreSQL entrou em modo de proteção contra wraparound.
+
+- **Causa raiz:** sem alerta para slots inativos + sem `max_slot_wal_keep_size`.
+- **Resolução:** force-drop do slot, `VACUUM FREEZE` emergencial, re-snapshot incremental.
+- **Lição:** `max_slot_wal_keep_size=30GB`, alertar em `active=false` para qualquer slot.
+
+### PM-002 -- DDL Sem Review Quebrou 23 Consumers
+
+DBA adicionou coluna `NOT NULL` sem default em tabela de alto tráfego. Debezium publicou schema incompatível. Consumers falharam na desserialização.
+
+- **Causa raiz:** sem review de DDL + `BACKWARD` em vez de `BACKWARD_TRANSITIVE`.
+- **Resolução:** reverter DDL, migrar consumers, reaplicar como nullable.
+- **Lição:** review obrigatório de DDL. Schema Registry em `BACKWARD_TRANSITIVE`.
+
+### PM-003 -- Tombstone Removido -> Ghost Data na Silver
+
+Tópico `compact,delete` com `retention.ms=86400000` (24h). Consumer offline por 36h. Tombstones desapareceram. Silver reteve linhas obsoletas.
+
+- **Causa raiz:** `compact,delete` com retenção menor que SLA de downtime.
+- **Resolução:** reprocessamento completo da Silver a partir da Bronze (6h).
+- **Lição:** usar **apenas** `compact`. `delete.retention.ms` >= 2× SLA de downtime.
+
+### PM-004 -- MongoDB Resume Token Inválido Após Migração
+
+Migração Atlas -> on-premise. Resume token antigo persistido. Conector em loop com `InvalidResumeToken`.
+
+- **Causa raiz:** resume token é escopo de cluster. Sem runbook de migração.
+- **Resolução:** deletar conector, limpar offset via REST API, re-snapshot.
+- **Lição:** avisar sobre escopo do resume token em runbooks de migração.
+
+### PM-005 -- Oracle: Archive Log Deletado Pelo RMAN (8h re-snapshot)
+
+Retenção RMAN 1 dia. Conector parado 26h. Archive logs rotacionados. `ORA-01291`. Re-snapshot de 200M registros = 8h.
+
+- **Causa raiz:** retenção RMAN menor que janela de manutenção.
+- **Resolução:** re-snapshot completo forçado.
+- **Lição:** retenção RMAN >= 7 dias.
+
+### PM-006 -- Oracle RAC: Redo Log Inacessível (ASM Mount)
+
+Redo logs do Node 2 em storage local após falha ASM. LogMiner com `ORA-00308`. Conector travado.
+
+- **Causa raiz:** ASM não validado após manutenção.
+- **Resolução:** remontagem manual ASM. Conector retomou automaticamente.
+- **Lição:** validar ASM mount em todos os nodes RAC no checklist de manutenção.
 
 ### 25.1 Riscos Específicos Enterprise
 
