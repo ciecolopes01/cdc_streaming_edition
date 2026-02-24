@@ -12,7 +12,6 @@
     "schema.include.list": "SCHEMA_APP",
     "table.include.list": "SCHEMA_APP.ORDERS,SCHEMA_APP.CUSTOMERS,SCHEMA_APP.PRODUCTS",
     "log.mining.strategy": "redo_log_catalog",
-    "log.mining.continuous.mine": "true",
     "log.mining.batch.size.default": "1000",
     "log.mining.batch.size.max": "10000",
     "log.mining.sleep.time.default.ms": "1000",

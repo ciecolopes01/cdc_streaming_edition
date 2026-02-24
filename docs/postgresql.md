@@ -1,4 +1,4 @@
-# PostgreSQL — Replication Slots, WAL & Vacuum
+# PostgreSQL -- Replication Slots, WAL & Vacuum
 
 PostgreSQL is the most feature-complete CDC source supported by Debezium. It is also the one with the most production pitfalls if vacuum and replication slots are not managed carefully.
 
@@ -274,14 +274,14 @@ Use when you need to re-capture a table without restarting the connector:
 
 ```sql
 -- Signal table (must be in Debezium's monitored tables)
-CREATE TABLE public.debezium_signal (
+CREATE TABLE public.debezium_signals (
     id   VARCHAR(64) PRIMARY KEY,
     type VARCHAR(32) NOT NULL,
     data TEXT
 );
 
 -- Trigger incremental snapshot
-INSERT INTO public.debezium_signal VALUES (
+INSERT INTO public.debezium_signals VALUES (
     'snapshot-orders-001',
     'execute-snapshot',
     '{"data-collections": ["public.orders"], "type": "incremental"}'

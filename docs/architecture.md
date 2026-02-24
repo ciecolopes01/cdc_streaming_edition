@@ -174,7 +174,7 @@ flowchart TD
 ```mermaid
 flowchart LR
     subgraph Network["Network Layer"]
-        TLS["TLS 1.3\nDB ↔ Debezium\nDebezium ↔ Kafka\nKafka ↔ Consumer"]
+        TLS["TLS 1.3\nDB <-> Debezium\nDebezium <-> Kafka\nKafka <-> Consumer"]
     end
 
     subgraph Auth["Authentication"]

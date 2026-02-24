@@ -1,4 +1,4 @@
-# Performance Tuning — Debezium & Kafka
+# Performance Tuning -- Debezium & Kafka
 
 ---
 
@@ -102,7 +102,7 @@ producer.retries=2147483647
 
 # NOT NEEDED in Kafka >= 2.5 with idempotence enabled
 # Setting this to 1 kills throughput unnecessarily
-# producer.max.in.flight.requests.per.connection=1   ← REMOVE THIS
+# producer.max.in.flight.requests.per.connection=1   -- REMOVE THIS
 ```
 
 > ⚠️ `max.in.flight.requests=1` was only needed for Kafka < 1.1. With idempotence enabled in modern Kafka, up to 5 in-flight requests per connection are allowed with full ordering guarantees.

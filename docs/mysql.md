@@ -1,4 +1,4 @@
-# MySQL — Binlog, GTID & Failover
+# MySQL -- Binlog, GTID & Failover
 
 ---
 

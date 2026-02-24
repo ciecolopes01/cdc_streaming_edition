@@ -1,4 +1,4 @@
-# Runbooks — Incident Response
+# Runbooks -- Incident Response
 
 Production-ready runbooks for the most common CDC incidents. Each runbook follows the same structure: Symptoms → Diagnose → Remediate → Prevent.
 
@@ -281,8 +281,8 @@ spark.sql("""
 # 3. Fix topic configuration going forward
 kafka-configs.sh --bootstrap-server kafka:9092 \
   --alter --entity-type topics --entity-name prod-pg.public.orders \
-  --add-config 'cleanup.policy=compact,delete.retention.ms=172800000'
-# Change compact,delete → compact if historical DELETE coverage is critical
+  --add-config 'cleanup.policy=compact' \
+  --add-config 'delete.retention.ms=172800000'
 ```
 
 **Prevent**

@@ -1,4 +1,4 @@
-# MongoDB — Change Streams & Resume Tokens
+# MongoDB -- Change Streams & Resume Tokens
 
 ---
 
@@ -60,15 +60,29 @@ db.createUser({
   "config": {
     "connector.class": "io.debezium.connector.mongodb.MongoDbConnector",
     "mongodb.connection.string": "mongodb://debezium:${file:/opt/connect/secrets.properties:mongo.password}@mongodb:27017/?replicaSet=rs0",
-    "topic.prefix": "prod-mongodb",
+    "topic.prefix": "prod-mongo",
     "database.include.list": "mydb",
     "collection.include.list": "mydb.orders,mydb.customers",
     "snapshot.mode": "initial",
     "heartbeat.interval.ms": "10000",
-    "capture.mode": "change_streams_update_full"
+    "capture.mode": "change_streams_update_full",
+    "tombstones.on.delete": "true",
+    "signal.data.collection": "mydb.debezium_signals",
+    "errors.tolerance": "all",
+    "errors.deadletterqueue.topic.name": "dlq.debezium.prod-mongo",
+    "errors.deadletterqueue.topic.replication.factor": "3",
+    "errors.deadletterqueue.context.headers.enable": "true",
+    "errors.log.enable": "true",
+    "errors.log.include.messages": "true",
+    "key.converter": "io.confluent.connect.avro.AvroConverter",
+    "value.converter": "io.confluent.connect.avro.AvroConverter",
+    "key.converter.schema.registry.url": "http://schema-registry:8081",
+    "value.converter.schema.registry.url": "http://schema-registry:8081"
   }
 }
 ```
+
+> The example in `examples/mongodb-connector.json` uses `change_streams_update_full_with_pre_image` which requires **MongoDB 6.0+**. Use `change_streams_update_full` (above) for MongoDB 4.0+.
 
 ---
 

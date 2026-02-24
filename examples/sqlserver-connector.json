@@ -12,6 +12,7 @@
         "snapshot.mode": "initial",
         "tombstones.on.delete": "true",
         "heartbeat.interval.ms": "10000",
+        "heartbeat.action.query": "UPDATE dbo.debezium_heartbeat SET ts = GETUTCDATE() WHERE id = 1",
         "signal.data.collection": "dbo.debezium_signals",
         "schema.history.internal.kafka.bootstrap.servers": "kafka:9092",
         "schema.history.internal.kafka.topic": "debezium.schema-history.prod-ss",

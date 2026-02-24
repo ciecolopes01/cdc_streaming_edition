@@ -1,4 +1,4 @@
-# Operations — Monitoring, Lifecycle & DLQ
+# Operations -- Monitoring, Lifecycle & DLQ
 
 ---
 

@@ -1,4 +1,4 @@
-# SQL Server — CDC, change_lsn & commit_lsn
+# SQL Server -- CDC, change_lsn & commit_lsn
 
 ---
 

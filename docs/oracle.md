@@ -1,4 +1,4 @@
-# Oracle — LogMiner, Redo Logs & SCN
+# Oracle -- LogMiner, Redo Logs & SCN
 
 Oracle CDC via Debezium is the most complex source connector. It uses Oracle's native **LogMiner** utility to read Redo and Archive Logs, extracting change events without impacting transactional workloads.
 
