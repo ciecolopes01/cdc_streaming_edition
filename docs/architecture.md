@@ -41,8 +41,10 @@ flowchart LR
     Sources -->|log streaming| D
     D <-->|schema reg| SR
     D --> T & H & DLQ
-    T --> DEDUP --> MERGE
-    MERGE --> BZ --> SV --> GD
+    T --> DEDUP
+    DEDUP --> BZ
+    BZ --> MERGE
+    MERGE --> SV --> GD
 ```
 
 ---

@@ -68,8 +68,8 @@ FLUSH PRIVILEGES;
     "table.include.list": "mydb.orders,mydb.customers",
     "snapshot.mode": "initial",
     "heartbeat.interval.ms": "10000",
-    "database.history.kafka.bootstrap.servers": "kafka:9092",
-    "database.history.kafka.topic": "debezium.schema-history.prod-mysql",
+    "schema.history.internal.kafka.bootstrap.servers": "kafka:9092",
+    "schema.history.internal.kafka.topic": "debezium.schema-history.prod-mysql",
     "decimal.handling.mode": "precise",
     "time.precision.mode": "adaptive_time_microseconds",
     "include.schema.changes": "true"

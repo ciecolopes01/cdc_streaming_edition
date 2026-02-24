@@ -241,7 +241,7 @@ ALTER TABLE orders DROP COLUMN customer_name;
 | Topic Type | cleanup.policy | retention.ms | delete.retention.ms | partitions | min.insync.replicas |
 |---|---|---|---|---|---|
 | CDC data (normal) | `compact` | `-1` | `172800000` (48h) | 1–3 | 2 |
-| CDC data (high volume) | `compact,delete` | `604800000` (7d) | `172800000` (48h) | 3–6 | 2 |
+| CDC data (high volume) | `compact` | `-1` | `604800000` (7d) | 3-6 | 2 |
 | Schema history | `delete` | `-1` | — | 1 | 3 |
 | DLQ | `delete` | `2592000000` (30d) | — | 1 | 2 |
 | Heartbeat | `delete` | `3600000` (1h) | — | 1 | 1 |

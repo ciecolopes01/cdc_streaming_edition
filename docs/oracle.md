@@ -128,8 +128,8 @@ GRANT CREATE SESSION, SELECT ANY TABLE, LOGMINING,
     "log.mining.sleep.time.min.ms": "300",
     "log.mining.sleep.time.max.ms": "3000",
 
-    "database.history.kafka.bootstrap.servers": "kafka:9092",
-    "database.history.kafka.topic": "debezium.schema-history.prod-oracle",
+    "schema.history.internal.kafka.bootstrap.servers": "kafka:9092",
+    "schema.history.internal.kafka.topic": "debezium.schema-history.prod-oracle",
 
     "snapshot.mode": "initial",
     "snapshot.locking.mode": "minimal",

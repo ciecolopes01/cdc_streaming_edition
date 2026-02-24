@@ -67,8 +67,8 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO debezium;
     "snapshot.locking.mode": "minimal",
     "heartbeat.interval.ms": "10000",
     "heartbeat.action.query": "UPDATE public.debezium_heartbeat SET ts = NOW() WHERE id = 1",
-    "database.history.kafka.bootstrap.servers": "kafka:9092",
-    "database.history.kafka.topic": "debezium.schema-history.prod-pg",
+    "schema.history.internal.kafka.bootstrap.servers": "kafka:9092",
+    "schema.history.internal.kafka.topic": "debezium.schema-history.prod-pg",
     "decimal.handling.mode": "precise",
     "time.precision.mode": "adaptive_time_microseconds"
   }

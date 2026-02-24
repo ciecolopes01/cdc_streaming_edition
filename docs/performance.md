@@ -132,21 +132,20 @@ max.poll.interval.ms=300000         # must be > processing time per batch
 flowchart LR
     subgraph Policy["cleanup.policy"]
         C1["compact\n\nBest for CDC\nNo data loss\nRetains latest per key\nSlower compaction"]
-        C2["compact,delete\n\nHybrid\nData lost after retention.ms\nFaster cleanup\n⚠️ tombstone risk"]
+        C2["compact,delete\n\nHybrid\nData lost after retention.ms\nFaster cleanup\nDANGEROUS for CDC\n(see PM-003)"]
         C3["delete\n\nSimple time/size\nNo compaction\nFast\nHistory lost"]
     end
 ```
 
 ```bash
-# High-throughput table: more partitions, hybrid policy
+# High-throughput table: more partitions, longer tombstone retention
 kafka-topics.sh --create \
   --bootstrap-server kafka:9092 \
   --topic prod-pg.public.events \
   --partitions 6 \
   --replication-factor 3 \
-  --config cleanup.policy=compact,delete \
-  --config retention.ms=604800000 \
-  --config delete.retention.ms=172800000 \
+  --config cleanup.policy=compact \
+  --config delete.retention.ms=604800000 \
   --config segment.ms=3600000 \
   --config min.cleanable.dirty.ratio=0.1 \
   --config compression.type=lz4

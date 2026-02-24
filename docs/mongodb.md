@@ -129,8 +129,9 @@ elif source_type == 'mongodb':
 # 1. Delete the connector
 curl -X DELETE http://kafka-connect:8083/connectors/debezium-mongodb-prod
 
-# 2. Delete the stored offset from connect-offsets topic
-# (requires kafka-consumer-groups.sh or offset reset tool)
+# 2. Clear stored offset using the REST API (Kafka Connect 3.5+)
+# Source connector offsets are in connect-offsets, NOT in consumer groups
+curl -X DELETE http://kafka-connect:8083/connectors/debezium-mongodb-prod/offsets
 
 # 3. Recreate connector with initial snapshot
 curl -X POST http://kafka-connect:8083/connectors \
