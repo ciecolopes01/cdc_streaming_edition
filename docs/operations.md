@@ -80,11 +80,10 @@ Configure DLQ to prevent deserialization errors from stalling the connector:
 > ⚠️ With `errors.tolerance=all`, the connector **continues processing** even when events fail. Monitor the DLQ actively — messages there indicate data loss or corruption.
 
 ```bash
-# Monitor DLQ message rate
+# Monitor DLQ consumer lag
 kafka-consumer-groups.sh --bootstrap-server kafka:9092 \
   --group dlq-monitor \
-  --describe \
-  --topic dlq.debezium.prod-pg
+  --describe
 
 # Read DLQ messages (last 100)
 kafka-console-consumer.sh --bootstrap-server kafka:9092 \

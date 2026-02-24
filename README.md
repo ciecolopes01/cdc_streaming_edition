@@ -4,7 +4,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Contributions Welcome](https://img.shields.io/badge/contributions-welcome-brightgreen.svg)](CONTRIBUTING.md)
-[![Stars](https://img.shields.io/github/stars/your-org/cdc-enterprise-extreme?style=social)](https://github.com/your-org/cdc-enterprise-extreme)
+[![Stars](https://img.shields.io/github/stars/ciecolopes01/cdc_streaming_edition?style=social)](https://github.com/ciecolopes01/cdc_streaming_edition)
 
 A community-driven, battle-tested reference for running **CDC pipelines at enterprise scale**. Built from real production incidents, iterative technical corrections, and deep peer review.
 
@@ -77,7 +77,9 @@ flowchart LR
 
     T1 --> SP
     SP --> DD
-    DD --> BZ --> SV --> GD
+    DD --> BZ
+    BZ --> MRG[MERGE / Upsert]
+    MRG --> SV --> GD
 ```
 
 ---
@@ -87,8 +89,8 @@ flowchart LR
 ### 1. Clone the repository
 
 ```bash
-git clone https://github.com/your-org/cdc-enterprise-extreme.git
-cd cdc-enterprise-extreme
+git clone https://github.com/ciecolopes01/cdc_streaming_edition.git
+cd cdc_streaming_edition
 ```
 
 ### 2. Deploy a connector
@@ -157,9 +159,10 @@ curl -s http://kafka-connect:8083/connectors/debezium-prod-pg/status | jq .
 ## Repository Structure
 
 ```
-cdc-enterprise-extreme/
+cdc_streaming_edition/
 |
 |-- README.md                <-- You are here
+|-- README_full.md           <-- Complete guide (PT-BR)
 |-- LICENSE                  <-- MIT
 |-- CONTRIBUTING.md          <-- How to contribute
 |-- CODE_OF_CONDUCT.md       <-- Community standards

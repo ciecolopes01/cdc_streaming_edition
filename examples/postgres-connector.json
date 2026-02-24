@@ -19,8 +19,6 @@
     "heartbeat.action.query": "UPDATE public.debezium_heartbeat SET ts = NOW() WHERE id = 1",
     "signal.data.collection": "public.debezium_signals",
     "incremental.snapshot.chunk.size": "1024",
-    "schema.history.internal.kafka.bootstrap.servers": "kafka:9092",
-    "schema.history.internal.kafka.topic": "debezium.schema-history.prod-pg",
     "decimal.handling.mode": "precise",
     "time.precision.mode": "adaptive_time_microseconds",
     "interval.handling.mode": "string",

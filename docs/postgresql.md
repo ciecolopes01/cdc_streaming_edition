@@ -67,10 +67,20 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO debezium;
     "snapshot.locking.mode": "minimal",
     "heartbeat.interval.ms": "10000",
     "heartbeat.action.query": "UPDATE public.debezium_heartbeat SET ts = NOW() WHERE id = 1",
-    "schema.history.internal.kafka.bootstrap.servers": "kafka:9092",
-    "schema.history.internal.kafka.topic": "debezium.schema-history.prod-pg",
     "decimal.handling.mode": "precise",
-    "time.precision.mode": "adaptive_time_microseconds"
+    "time.precision.mode": "adaptive_time_microseconds",
+    "tombstones.on.delete": "true",
+    "signal.data.collection": "public.debezium_signals",
+    "errors.tolerance": "all",
+    "errors.deadletterqueue.topic.name": "dlq.debezium.prod-pg",
+    "errors.deadletterqueue.topic.replication.factor": "3",
+    "errors.deadletterqueue.context.headers.enable": "true",
+    "errors.log.enable": "true",
+    "errors.log.include.messages": "true",
+    "key.converter": "io.confluent.connect.avro.AvroConverter",
+    "value.converter": "io.confluent.connect.avro.AvroConverter",
+    "key.converter.schema.registry.url": "http://schema-registry:8081",
+    "value.converter.schema.registry.url": "http://schema-registry:8081"
   }
 }
 ```
@@ -85,8 +95,9 @@ The **LSN (Log Sequence Number)** is PostgreSQL's position in the WAL. It is mon
 if source_type == 'postgresql':
     return df.withColumn('_offset_key', F.col('source.lsn').cast('string'))
 
-# For correct numeric ordering (avoids string comparison issues)
-window = Window.partitionBy('_offset_key').orderBy(F.col('source.lsn').cast('long').desc())
+# Logical deduplication: partition by PK, order by LSN descending
+# Partitioning by _offset_key would be a no-op (each event has a unique offset)
+window = Window.partitionBy(*pk_cols).orderBy(F.col('source.lsn').cast('long').desc())
 ```
 
 ---
@@ -106,10 +117,21 @@ window = Window.partitionBy('_offset_key').orderBy(F.col('source.lsn').cast('lon
 ALTER TABLE orders ADD COLUMN customer_full_name VARCHAR(255);
 
 -- Step 2: Keep them in sync during migration
+CREATE OR REPLACE FUNCTION sync_customer_name()
+RETURNS TRIGGER AS $$
+BEGIN
+    IF NEW.customer_name IS NOT NULL THEN
+        NEW.customer_full_name = NEW.customer_name;
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
 CREATE TRIGGER sync_name BEFORE INSERT OR UPDATE ON orders
-FOR EACH ROW EXECUTE FUNCTION sync_name_columns();
+FOR EACH ROW EXECUTE FUNCTION sync_customer_name();
 
 -- Step 3: After all consumers migrated, drop the old column
+DROP TRIGGER sync_name ON orders;
 ALTER TABLE orders DROP COLUMN customer_name;
 ```
 

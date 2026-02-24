@@ -97,7 +97,20 @@ elif source_type == 'sqlserver':
     "schema.history.internal.kafka.bootstrap.servers": "kafka:9092",
     "schema.history.internal.kafka.topic": "debezium.schema-history.prod-ss",
     "decimal.handling.mode": "precise",
-    "heartbeat.interval.ms": "10000"
+    "time.precision.mode": "adaptive_time_microseconds",
+    "heartbeat.interval.ms": "10000",
+    "tombstones.on.delete": "true",
+    "signal.data.collection": "dbo.debezium_signals",
+    "errors.tolerance": "all",
+    "errors.deadletterqueue.topic.name": "dlq.debezium.prod-ss",
+    "errors.deadletterqueue.topic.replication.factor": "3",
+    "errors.deadletterqueue.context.headers.enable": "true",
+    "errors.log.enable": "true",
+    "errors.log.include.messages": "true",
+    "key.converter": "io.confluent.connect.avro.AvroConverter",
+    "value.converter": "io.confluent.connect.avro.AvroConverter",
+    "key.converter.schema.registry.url": "http://schema-registry:8081",
+    "value.converter.schema.registry.url": "http://schema-registry:8081"
   }
 }
 ```

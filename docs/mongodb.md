@@ -59,7 +59,7 @@ db.createUser({
   "name": "debezium-mongodb-prod",
   "config": {
     "connector.class": "io.debezium.connector.mongodb.MongoDbConnector",
-    "mongodb.connection.string": "mongodb://debezium:password@mongodb:27017/?replicaSet=rs0",
+    "mongodb.connection.string": "mongodb://debezium:${file:/opt/connect/secrets.properties:mongo.password}@mongodb:27017/?replicaSet=rs0",
     "topic.prefix": "prod-mongodb",
     "database.include.list": "mydb",
     "collection.include.list": "mydb.orders,mydb.customers",

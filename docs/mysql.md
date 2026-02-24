@@ -72,7 +72,19 @@ FLUSH PRIVILEGES;
     "schema.history.internal.kafka.topic": "debezium.schema-history.prod-mysql",
     "decimal.handling.mode": "precise",
     "time.precision.mode": "adaptive_time_microseconds",
-    "include.schema.changes": "true"
+    "include.schema.changes": "true",
+    "tombstones.on.delete": "true",
+    "signal.data.collection": "mydb.debezium_signals",
+    "errors.tolerance": "all",
+    "errors.deadletterqueue.topic.name": "dlq.debezium.prod-mysql",
+    "errors.deadletterqueue.topic.replication.factor": "3",
+    "errors.deadletterqueue.context.headers.enable": "true",
+    "errors.log.enable": "true",
+    "errors.log.include.messages": "true",
+    "key.converter": "io.confluent.connect.avro.AvroConverter",
+    "value.converter": "io.confluent.connect.avro.AvroConverter",
+    "key.converter.schema.registry.url": "http://schema-registry:8081",
+    "value.converter.schema.registry.url": "http://schema-registry:8081"
   }
 }
 ```
@@ -117,7 +129,8 @@ if source_type == 'mysql':
 
 ```sql
 -- Binlog status and current position
-SHOW MASTER STATUS;
+SHOW MASTER STATUS;          -- MySQL < 8.2
+-- SHOW BINARY LOG STATUS;   -- MySQL >= 8.2 (SHOW MASTER STATUS is deprecated)
 
 -- Available binary logs
 SHOW BINARY LOGS;

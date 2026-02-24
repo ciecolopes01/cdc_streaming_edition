@@ -121,7 +121,6 @@ GRANT CREATE SESSION, SELECT ANY TABLE, LOGMINING,
     "table.include.list": "SCHEMA_APP.ORDERS,SCHEMA_APP.CUSTOMERS",
 
     "log.mining.strategy": "redo_log_catalog",
-    "log.mining.continuous.mine": "true",
     "log.mining.batch.size.default": "1000",
     "log.mining.batch.size.max": "10000",
     "log.mining.sleep.time.default.ms": "1000",
@@ -133,13 +132,27 @@ GRANT CREATE SESSION, SELECT ANY TABLE, LOGMINING,
 
     "snapshot.mode": "initial",
     "snapshot.locking.mode": "minimal",
+    "tombstones.on.delete": "true",
+    "signal.data.collection": "SCHEMA_APP.DEBEZIUM_SIGNALS",
 
     "decimal.handling.mode": "precise",
     "time.precision.mode": "adaptive_time_microseconds",
     "lob.enabled": "false",
 
     "heartbeat.interval.ms": "10000",
-    "heartbeat.action.query": "UPDATE SCHEMA_APP.DEBEZIUM_HEARTBEAT SET TS = SYSTIMESTAMP WHERE ID = 1"
+    "heartbeat.action.query": "UPDATE SCHEMA_APP.DEBEZIUM_HEARTBEAT SET TS = SYSTIMESTAMP WHERE ID = 1",
+
+    "errors.tolerance": "all",
+    "errors.deadletterqueue.topic.name": "dlq.debezium.prod-oracle",
+    "errors.deadletterqueue.topic.replication.factor": "3",
+    "errors.deadletterqueue.context.headers.enable": "true",
+    "errors.log.enable": "true",
+    "errors.log.include.messages": "true",
+
+    "key.converter": "io.confluent.connect.avro.AvroConverter",
+    "value.converter": "io.confluent.connect.avro.AvroConverter",
+    "key.converter.schema.registry.url": "http://schema-registry:8081",
+    "value.converter.schema.registry.url": "http://schema-registry:8081"
   }
 }
 ```
@@ -245,11 +258,13 @@ This completely eliminates mining overhead on the primary — the gold standard 
 
 ```json
 {
-  "before": null,    ← supplemental logging not configured
+  "before": null,
   "after": { "id": 1, "nome": "Alicia" },
   "op": "u"
 }
 ```
+
+> The `before: null` above indicates supplemental logging is not configured.
 
 **Fix**:
 ```sql
